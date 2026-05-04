@@ -67,7 +67,17 @@ html, body {
 }
 .top-bar-brand {
   display: inline-block;
+  text-decoration: none;
+  line-height: 0; /* eliminate phantom inline-block descender space */
 }
+.top-bar .brand-logo {
+  height: 64px;
+  width: auto;
+  display: block;
+  max-width: 100%;
+  object-fit: contain;
+}
+/* Legacy text-brand styles kept in case other places still reference them */
 .top-bar .brand-name {
   font-family: var(--serif);
   font-size: 34px;
@@ -1484,6 +1494,13 @@ html, body {
   text-align: center;
   flex-shrink: 0;
 }
+.ob-topbar .ob-logo {
+  height: 56px;
+  width: auto;
+  display: inline-block;
+  max-width: 100%;
+  object-fit: contain;
+}
 .ob-topbar .brand-name {
   font-family: var(--serif);
   font-size: 28px;
@@ -2677,6 +2694,7 @@ input[type="range"]::-moz-range-thumb {
   .log-shell { padding: 28px 32px; }
   .top-bar { padding: 22px 32px 18px; }
   .top-bar .brand-name { font-size: 30px; }
+  .top-bar .brand-logo { height: 56px; }
 }
 
 /* Large desktop polish — give it more breathing room */
@@ -2687,6 +2705,7 @@ input[type="range"]::-moz-range-thumb {
   .trend-bignum { font-size: 88px; }
   .top-bar { padding: 32px 32px 26px; }
   .top-bar .brand-name { font-size: 38px; }
+  .top-bar .brand-logo { height: 72px; }
 }
 
 @media (max-width: 900px) {
@@ -2764,6 +2783,8 @@ input[type="range"]::-moz-range-thumb {
   .top-bar { padding: 18px 18px 14px; }
   .top-bar .brand-name { font-size: 26px; }
   .top-bar .brand-tag { font-size: 10px; margin-top: 4px; }
+  .top-bar .brand-logo { height: 48px; }
+  .ob-topbar .ob-logo { height: 44px; }
   .layout { min-height: auto; }
   .tdee-row { grid-template-columns: 1fr; }
   .insight-stat-row { grid-template-columns: 1fr; gap: 8px; }
@@ -2794,6 +2815,8 @@ input[type="range"]::-moz-range-thumb {
   .view-header { margin-bottom: 24px; }
   .top-bar { padding: 14px 14px 12px; }
   .top-bar .brand-name { font-size: 22px; }
+  .top-bar .brand-logo { height: 40px; }
+  .ob-topbar .ob-logo { height: 36px; }
   .insight-card-lg { padding: 22px 20px; }
   .insight-prose { font-size: 15px; line-height: 1.6; }
   .log-shell { padding: 20px 18px; }

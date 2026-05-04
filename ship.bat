@@ -17,16 +17,18 @@ REM =====================================================
 
 setlocal
 
-if "%~1"=="" (
+REM If no argument was passed (e.g. double-click), prompt for one interactively.
+set "MSG=%~1"
+if "%MSG%"=="" (
   echo.
-  echo ERROR: You must provide a commit message.
+  echo No commit message was passed in.
   echo.
-  echo Usage:
-  echo   ship.bat "Short description of what changed"
+  set /p "MSG=Enter a short description of what changed: "
+)
+
+if "%MSG%"=="" (
   echo.
-  echo Example:
-  echo   ship.bat "Add Recent foods strip on Today"
-  echo.
+  echo No message entered. Aborting.
   pause
   exit /b 1
 )
@@ -58,8 +60,8 @@ REM Stage everything
 git add -A
 if errorlevel 1 goto :error
 
-REM Commit
-git commit -m "%~1"
+REM Commit (uses MSG variable so it works whether passed via arg or prompted)
+git commit -m "%MSG%"
 if errorlevel 1 (
   echo.
   echo Nothing to commit, or commit failed. If "nothing to commit",

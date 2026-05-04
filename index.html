@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Calorie Correct — The honest calorie counter</title>
 <meta name="description" content="The honest calorie counter that calibrates to your real weight loss. Stop guessing — start measuring.">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="favicon.png">
 <style>
   :root {
     --bg: #F5F1EA;
@@ -49,6 +51,20 @@
     top: 0;
     z-index: 50;
   }
+  .nav-brand-link {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    line-height: 0;
+  }
+  .nav-logo {
+    height: 56px;
+    width: auto;
+    display: block;
+    max-width: 100%;
+    object-fit: contain;
+  }
+  /* Legacy text-brand styles, kept as fallback */
   .nav-brand {
     font-family: var(--serif);
     font-size: 28px;
@@ -380,6 +396,14 @@
     color: var(--primary-dark);
     margin-bottom: 8px;
   }
+  .footer-logo {
+    height: 56px;
+    width: auto;
+    display: inline-block;
+    max-width: 100%;
+    margin-bottom: 14px;
+    object-fit: contain;
+  }
 
   /* === Responsive === */
   @media (max-width: 800px) {
@@ -391,6 +415,8 @@
     .problem-grid, .pillar-grid { grid-template-columns: 1fr; }
     .nav-bar { padding: 16px 20px; }
     .nav-brand { font-size: 22px; }
+    .nav-logo { height: 44px; }
+    .footer-logo { height: 48px; }
     .nav-links { gap: 14px; font-size: 13px; }
     .final-h { font-size: 36px; }
     .quote-card { padding: 28px 24px; }
@@ -402,7 +428,9 @@
 
 <!-- ============ NAV ============ -->
 <nav class="nav-bar">
-  <div class="nav-brand">Calorie<span class="nav-sep">·</span>Correct</div>
+  <a class="nav-brand-link" href="/">
+    <img class="nav-logo" src="cc-logo.png" alt="Calorie Correct" />
+  </a>
   <div class="nav-links">
     <a class="nav-link" href="#how">How it works</a>
     <a class="nav-link" href="#who">Who it's for</a>
@@ -525,7 +553,7 @@
 
 <!-- ============ FOOTER ============ -->
 <footer class="footer">
-  <div class="footer-brand">Calorie<span class="nav-sep">·</span>Correct</div>
+  <img class="footer-logo" src="cc-logo.png" alt="Calorie Correct" />
   <div>The honest calorie counter. Prototype build · 2026.</div>
 </footer>
 
