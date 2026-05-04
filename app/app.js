@@ -497,7 +497,7 @@ function makeBlankState() {
       trackerAccuracy: 1.0,
       targetLossRate: 1.0,
     },
-    weights: [], meals: [], exercises: [], dayNotes: {},
+    weights: [], meals: [], exercises: [], dayNotes: {}, savedMeals: [],
     onboarded: false,
   };
 }
@@ -521,6 +521,7 @@ function migrateState(s) {
   if (s.user.trackerAccuracy == null) s.user.trackerAccuracy = 1.0;
   if (s.user.targetLossRate == null) s.user.targetLossRate = 1.0; // lb/week
   if (!s.dayNotes) s.dayNotes = {}; // map of dateISO → note text
+  if (!Array.isArray(s.savedMeals)) s.savedMeals = []; // user-defined meal templates
   return s;
 }
 
@@ -830,6 +831,66 @@ function getMealsForDate(s, date) {
   return s.meals
     .filter(m => m.date === date)
     .sort((a, b) => a.time.localeCompare(b.time));
+}
+
+/* Recent foods — most-frequently-logged item names from the last 30 days,
+ * sorted by frequency desc, then by recency desc. Used to populate the
+ * one-tap chip strip on Today. */
+function getRecentFoods(s, limit) {
+  const lim = limit || 8;
+  const cutoff = new Date(Date.now() - 30 * 86400000);
+  const cutoffISO = formatDateISO(cutoff);
+  const counts = new Map(); // key (lowercased name) -> { name, count, lastCal, lastDate }
+  for (const meal of s.meals) {
+    if (meal.date < cutoffISO) continue;
+    if (!Array.isArray(meal.items)) continue;
+    for (const item of meal.items) {
+      if (!item || !item.name) continue;
+      const key = String(item.name).toLowerCase().trim();
+      if (!key) continue;
+      const cal = parseInt(item.calories) || 0;
+      if (cal <= 0) continue; // skip zero-cal entries (data noise)
+      const existing = counts.get(key);
+      if (!existing) {
+        counts.set(key, { name: item.name, count: 1, lastCal: cal, lastDate: meal.date });
+      } else {
+        existing.count += 1;
+        if (meal.date >= existing.lastDate) {
+          existing.lastDate = meal.date;
+          existing.lastCal = cal;
+        }
+      }
+    }
+  }
+  const all = Array.from(counts.values());
+  all.sort((a, b) => b.count - a.count || b.lastDate.localeCompare(a.lastDate));
+  return all.slice(0, lim);
+}
+
+/* Search FOOD_DB for foods whose name or aliases match the query.
+ * Used by the search-as-you-type dropdown on Today.
+ * Scores matches: prefix on alias > prefix on name > contained in alias > contained in name.
+ * Returns up to `limit` results. */
+function searchFoodDb(query, limit) {
+  const lim = limit || 6;
+  const q = String(query || '').toLowerCase().trim();
+  if (q.length < 2) return [];
+  const results = [];
+  for (const f of FOOD_DB) {
+    let score = 0;
+    const nameLower = f.name.toLowerCase();
+    if (nameLower.startsWith(q)) score = 100;
+    else if (nameLower.includes(q)) score = 50;
+    for (const a of (f.aliases || [])) {
+      const aLower = String(a).toLowerCase();
+      if (aLower === q) score = Math.max(score, 110); // exact alias = best
+      else if (aLower.startsWith(q)) score = Math.max(score, 90);
+      else if (aLower.includes(q)) score = Math.max(score, 40);
+    }
+    if (score > 0) results.push({ name: f.name, cal: f.cal, score });
+  }
+  results.sort((a, b) => b.score - a.score || a.name.length - b.name.length);
+  return results.slice(0, lim);
 }
 
 function getAverageDailyCalories(s, fromISO, toISO) {
@@ -1635,7 +1696,7 @@ VIEW_RENDERERS.today = function (c) {
           </div>
           <div class="ring-budget"><strong>${consumed.toLocaleString()}</strong> of <strong>${target.toLocaleString()}</strong> logged today</div>
           <div class="ring-target-meta">Target ${cal.ready ? 'calibrated to your trend' : 'using starting estimate'}</div>
-          ${todaysBurnRaw > 0 ? `<div class="ring-exercise-line">+${todaysBurnRaw} cal burned today · ${getExercisesForDate(state, today).length} ${getExercisesForDate(state, today).length === 1 ? 'activity' : 'activities'}</div>` : ''}
+          ${todaysBurnRaw > 0 ? `<div class="ring-exercise-line">+${todaysBurnRaw} cal burned today · ${getExercisesForDate(state, today).length} ${getExercisesForDate(state, today).length === 1 ? 'activity' : 'activities'}${trackerAcc < 1.0 ? ` · ${todaysBurnAdj} after ${Math.round(trackerAcc * 100)}% haircut` : ''}</div>` : ''}
         </div>
       </div>
       <div>
@@ -1725,6 +1786,212 @@ function renderPlateauBanner(s) {
   </div>`;
 }
 
+function renderRecentFoodsStrip() {
+  const recent = getRecentFoods(state, 8);
+  if (recent.length === 0) return '';
+  return `<div class="recent-foods-strip">
+    <div class="recent-foods-label">RECENT</div>
+    <div class="recent-foods-chips">
+      ${recent.map((f, i) => `
+        <button class="recent-chip" data-recent-idx="${i}" title="${escapeAttr(f.name)} · ${f.lastCal} cal · logged ${f.count}×">
+          <span class="recent-chip-name">${escapeAttr(f.name)}</span>
+          <span class="recent-chip-cal">${f.lastCal}</span>
+        </button>
+      `).join('')}
+    </div>
+  </div>`;
+}
+
+function logRecentFood(idx) {
+  const recent = getRecentFoods(state, 8);
+  const food = recent[idx];
+  if (!food) return;
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const meal = {
+    id: Date.now(),
+    date: todayISO(),
+    time,
+    mealType: guessMealType(now.getHours()),
+    raw: food.name,
+    items: [{ name: food.name, calories: food.lastCal, source: 'recent' }],
+    totalCal: food.lastCal,
+    source: 'recent',
+  };
+  state.meals.push(meal);
+  recordAction({ type: 'create-meal', meal });
+  saveState();
+  toast(`Logged ${food.name} (${food.lastCal} cal)`, { undo: true });
+  navigate('today');
+}
+
+function wireRecentFoodsStrip() {
+  document.querySelectorAll('[data-recent-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      logRecentFood(parseInt(btn.dataset.recentIdx));
+    });
+  });
+}
+
+/* "Same as yesterday" — shows if today is empty and yesterday has data.
+ * Copies all of yesterday's meals (with new IDs but original times) and
+ * exercises to today's date. Useful for routine days. */
+function getYesterdayISO() {
+  const today = parseISODate(todayISO());
+  const y = new Date(today.getTime() - 86400000);
+  return formatDateISO(y);
+}
+
+function getCopyYesterdaySummary() {
+  const yISO = getYesterdayISO();
+  const meals = state.meals.filter(m => m.date === yISO);
+  const exercises = (state.exercises || []).filter(e => e.date === yISO);
+  if (meals.length === 0 && exercises.length === 0) return null;
+  const totalCal = meals.reduce((s, m) => s + m.totalCal, 0);
+  const totalBurn = exercises.reduce((s, e) => s + (e.caloriesBurned || 0), 0);
+  return { meals, exercises, totalCal, totalBurn };
+}
+
+function renderCopyYesterdayCard() {
+  // Only show when today has no meals yet
+  const today = todayISO();
+  const todayMeals = state.meals.filter(m => m.date === today);
+  if (todayMeals.length > 0) return '';
+  const summary = getCopyYesterdaySummary();
+  if (!summary) return '';
+  const itemBits = [];
+  if (summary.meals.length) itemBits.push(`${summary.meals.length} ${summary.meals.length === 1 ? 'meal' : 'meals'} (${summary.totalCal} cal)`);
+  if (summary.exercises.length) itemBits.push(`${summary.exercises.length} ${summary.exercises.length === 1 ? 'workout' : 'workouts'}`);
+  return `<button class="copy-yesterday-btn" id="copy-yesterday-btn">
+    <span class="copy-yesterday-icon">↻</span>
+    <span class="copy-yesterday-body">
+      <span class="copy-yesterday-title">Same as yesterday</span>
+      <span class="copy-yesterday-detail">${itemBits.join(' · ')}</span>
+    </span>
+  </button>`;
+}
+
+function copyYesterdayToToday() {
+  const summary = getCopyYesterdaySummary();
+  if (!summary) return;
+  const today = todayISO();
+  // Confirm to avoid surprise
+  if (!confirm(`Copy yesterday's ${summary.meals.length} meals and ${summary.exercises.length} workouts to today?`)) return;
+  let baseId = Date.now();
+  const newMeals = summary.meals.map(m => ({
+    ...m,
+    id: ++baseId,
+    date: today,
+    items: m.items.map(i => ({ ...i })),
+    source: 'copied',
+  }));
+  const newExercises = summary.exercises.map(e => ({
+    ...e,
+    id: ++baseId,
+    date: today,
+  }));
+  state.meals.push(...newMeals);
+  state.exercises = (state.exercises || []).concat(newExercises);
+  saveState();
+  toast(`Copied ${newMeals.length} meals and ${newExercises.length} workouts from yesterday.`);
+  navigate('today');
+}
+
+function wireCopyYesterdayBtn() {
+  const btn = document.getElementById('copy-yesterday-btn');
+  if (btn) btn.addEventListener('click', copyYesterdayToToday);
+}
+
+/* Saved meals — user-defined combos like "My breakfast". One tap logs all components. */
+function renderSavedMealsStrip() {
+  const meals = (state.savedMeals || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (meals.length === 0) return '';
+  return `<div class="saved-meals-strip">
+    <div class="saved-meals-label">SAVED MEALS</div>
+    <div class="saved-meals-chips">
+      ${meals.map((m) => {
+        const total = m.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+        return `<button class="saved-meal-chip" data-saved-id="${m.id}" title="${escapeAttr(m.items.map(i => i.name).join(', '))}">
+          <span class="saved-meal-name">${escapeAttr(m.name)}</span>
+          <span class="saved-meal-cal">${total}</span>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function logSavedMeal(savedId) {
+  const saved = (state.savedMeals || []).find(m => m.id === savedId);
+  if (!saved) return;
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const totalCal = saved.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+  const meal = {
+    id: Date.now(),
+    date: todayISO(),
+    time,
+    mealType: guessMealType(now.getHours()),
+    raw: saved.name,
+    items: saved.items.map(i => ({ name: i.name, calories: i.calories, source: 'saved' })),
+    totalCal,
+    source: 'saved',
+  };
+  state.meals.push(meal);
+  recordAction({ type: 'create-meal', meal });
+  saveState();
+  toast(`Logged ${saved.name} (${totalCal} cal)`, { undo: true });
+  navigate('today');
+}
+
+function wireSavedMealsStrip() {
+  document.querySelectorAll('[data-saved-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      logSavedMeal(parseInt(btn.dataset.savedId));
+    });
+  });
+}
+
+/* Save the current parse draft as a reusable saved meal. Prompts for a name. */
+function saveDraftAsSavedMeal() {
+  if (!todayParseDraft || !todayParseDraft.items.length) return;
+  const defaultName = todayParseDraft.text ? todayParseDraft.text.slice(0, 40) : 'My meal';
+  const name = window.prompt('Name this meal (e.g. "My breakfast"):', defaultName);
+  if (!name || !name.trim()) return;
+  const trimmed = name.trim().slice(0, 60);
+  if (!Array.isArray(state.savedMeals)) state.savedMeals = [];
+  state.savedMeals.push({
+    id: Date.now(),
+    name: trimmed,
+    items: todayParseDraft.items.map(i => ({ name: i.name, calories: parseInt(i.calories) || 0 })),
+    createdAt: todayISO(),
+  });
+  saveState();
+  toast(`Saved "${trimmed}". Tap the chip to log it again.`);
+}
+
+/* Log a single food (from the search dropdown). Same shape as logRecentFood,
+ * but takes name and cal directly. */
+function logFoodFromSearch(name, cal) {
+  if (!name || !cal) return;
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const meal = {
+    id: Date.now(),
+    date: todayISO(),
+    time,
+    mealType: guessMealType(now.getHours()),
+    raw: name,
+    items: [{ name, calories: cal, source: 'search' }],
+    totalCal: cal,
+    source: 'search',
+  };
+  state.meals.push(meal);
+  recordAction({ type: 'create-meal', meal });
+  saveState();
+  toast(`Logged ${name} (${cal} cal)`, { undo: true });
+  navigate('today');
+}
+
 function renderTodayLogger() {
   const showParseResult = todayLogTab === 'describe' && todayParseDraft;
   return `<div class="today-logger">
@@ -1735,10 +2002,16 @@ function renderTodayLogger() {
         <button class="log-mode-tab ${todayLogTab === 'numeric' ? 'active' : ''}" data-today-tab="numeric">Quick number</button>
       </div>
     </div>
+    ${renderCopyYesterdayCard()}
+    ${renderRecentFoodsStrip()}
+    ${renderSavedMealsStrip()}
     ${todayLogTab === 'describe' ? `
-      <div style="display: flex; gap: 8px;">
-        <input class="input" id="today-log-input" placeholder="e.g. turkey sandwich and an apple" ${showParseResult ? 'disabled' : ''} />
-        <button class="btn btn-primary btn-sm" id="today-parse-btn" ${showParseResult ? 'disabled' : ''}>Parse</button>
+      <div class="today-log-input-wrap">
+        <div style="display: flex; gap: 8px;">
+          <input class="input" id="today-log-input" placeholder="e.g. turkey sandwich and an apple" autocomplete="off" ${showParseResult ? 'disabled' : ''} />
+          <button class="btn btn-primary btn-sm" id="today-parse-btn" ${showParseResult ? 'disabled' : ''}>Parse</button>
+        </div>
+        <div class="food-search-dropdown" id="today-search-dropdown" hidden></div>
       </div>
       ${showParseResult ? renderTodayParseDraft() : ''}
     ` : `
@@ -1774,11 +2047,18 @@ function renderTodayParseDraft() {
       </div>
     `).join('')}
     <div class="parsed-total"><div class="parsed-total-label">Total</div><div class="parsed-total-cal" id="today-parse-total">${total} cal</div></div>
-    <div class="parsed-actions"><button class="btn btn-primary btn-block" id="today-parse-save">Save</button><button class="btn btn-secondary" id="today-parse-cancel">Cancel</button></div>
+    <div class="parsed-actions">
+      <button class="btn btn-primary btn-block" id="today-parse-save">Save</button>
+      <button class="btn btn-secondary" id="today-parse-saveas" title="Save as a reusable meal">★ Save as meal</button>
+      <button class="btn btn-secondary" id="today-parse-cancel">Cancel</button>
+    </div>
   </div>`;
 }
 
 function wireTodayLogger() {
+  wireRecentFoodsStrip();
+  wireSavedMealsStrip();
+  wireCopyYesterdayBtn();
   document.querySelectorAll('[data-today-tab]').forEach(btn => {
     btn.addEventListener('click', (e) => { todayLogTab = e.currentTarget.dataset.todayTab; todayParseDraft = null; navigate(currentView); });
   });
@@ -1786,6 +2066,41 @@ function wireTodayLogger() {
     if (!todayParseDraft) {
       const inp = document.getElementById('today-log-input');
       const btn = document.getElementById('today-parse-btn');
+      const dropdown = document.getElementById('today-search-dropdown');
+      let activeResults = [];
+      let activeIndex = -1;
+
+      const renderDropdown = () => {
+        if (!activeResults.length) {
+          dropdown.hidden = true;
+          dropdown.innerHTML = '';
+          return;
+        }
+        dropdown.hidden = false;
+        dropdown.innerHTML = activeResults.map((r, i) => `
+          <button class="food-search-item ${i === activeIndex ? 'active' : ''}" data-search-idx="${i}">
+            <span class="food-search-name">${escapeAttr(r.name)}</span>
+            <span class="food-search-cal">${r.cal} cal</span>
+          </button>
+        `).join('');
+        dropdown.querySelectorAll('[data-search-idx]').forEach(el => {
+          el.addEventListener('mousedown', (e) => { e.preventDefault(); }); // keep input focused
+          el.addEventListener('click', () => {
+            const idx = parseInt(el.dataset.searchIdx);
+            const food = activeResults[idx];
+            if (!food) return;
+            logFoodFromSearch(food.name, food.cal);
+          });
+        });
+      };
+
+      const handleSearch = () => {
+        const q = inp.value.trim();
+        activeResults = searchFoodDb(q, 6);
+        activeIndex = -1;
+        renderDropdown();
+      };
+
       const handleParse = () => {
         const text = inp.value.trim(); if (!text) return;
         const items = parseMealText(text); if (!items.length) return;
@@ -1793,8 +2108,37 @@ function wireTodayLogger() {
         todayParseDraft = { text, items, mealType: guessMealType(now.getHours()) };
         navigate(currentView);
       };
+
       btn.addEventListener('click', handleParse);
-      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleParse(); });
+      inp.addEventListener('input', handleSearch);
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (!activeResults.length) return;
+          activeIndex = (activeIndex + 1) % activeResults.length;
+          renderDropdown();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (!activeResults.length) return;
+          activeIndex = (activeIndex - 1 + activeResults.length) % activeResults.length;
+          renderDropdown();
+        } else if (e.key === 'Enter') {
+          if (activeIndex >= 0 && activeResults[activeIndex]) {
+            const food = activeResults[activeIndex];
+            logFoodFromSearch(food.name, food.cal);
+          } else {
+            handleParse();
+          }
+        } else if (e.key === 'Escape') {
+          activeResults = [];
+          activeIndex = -1;
+          renderDropdown();
+        }
+      });
+      // Hide dropdown on focus loss (with a tiny delay so click handlers can fire first)
+      inp.addEventListener('blur', () => {
+        setTimeout(() => { activeResults = []; activeIndex = -1; renderDropdown(); }, 150);
+      });
     } else {
       document.querySelectorAll('input[data-today-idx]').forEach(input => {
         input.addEventListener('input', (e) => {
@@ -1814,6 +2158,8 @@ function wireTodayLogger() {
       });
       document.getElementById('today-parse-mealtype').addEventListener('change', (e) => { todayParseDraft.mealType = e.target.value; });
       document.getElementById('today-parse-save').addEventListener('click', saveTodayParse);
+      const saveAsBtn = document.getElementById('today-parse-saveas');
+      if (saveAsBtn) saveAsBtn.addEventListener('click', saveDraftAsSavedMeal);
       document.getElementById('today-parse-cancel').addEventListener('click', () => { todayParseDraft = null; navigate(currentView); });
     }
   } else {
@@ -2331,34 +2677,104 @@ function openExerciseEdit(exId) {
 }
 
 function openExerciseAdd() {
-  const draft = { type: 'walking', duration: 30, caloriesBurned: estimateExerciseCalories('walking', 30, getCurrentWeight(state)) };
-  let userOverride = false;
+  // Preset tiles shown first — most-common activities. Order chosen to match common
+  // logging frequency. "Other" reveals the full activity dropdown.
+  const PRESETS = [
+    { id: 'walking',  name: 'Walk',     emoji: '🚶' },
+    { id: 'running',  name: 'Run',      emoji: '🏃' },
+    { id: 'strength', name: 'Lift',     emoji: '🏋️' },
+    { id: 'cycling',  name: 'Bike',     emoji: '🚴' },
+    { id: 'other',    name: 'Other…',   emoji: '➕' },
+  ];
+  let selectedTypeId = 'walking';
+  let userOverride = false; // user manually edited the calorie field
+  let showFullSelector = false; // toggled when "Other..." is tapped
+
   const modal = document.getElementById('modal');
-  modal.innerHTML = `<div class="modal-h">Log activity</div><div class="modal-sub">Logged exercise feeds into your weekly calibration.</div>
-    <div class="form-row"><div class="form-label">Activity</div><select class="form-select" id="addex-type">${EXERCISE_TYPES.map(t => `<option value="${t.id}" ${draft.type === t.id ? 'selected' : ''}>${t.emoji} ${t.name}</option>`).join('')}</select></div>
-    <div class="form-row form-row-2"><div><div class="form-label">Duration (min)</div><input class="form-input" type="number" id="addex-duration" value="${draft.duration}" min="1" max="600" /></div><div><div class="form-label">Calories burned</div><input class="form-input" type="number" id="addex-calories" value="${draft.caloriesBurned}" min="0" max="3000" /></div></div>
-    <div class="form-row"><div class="form-label">Note</div><input class="form-input" type="text" id="addex-note" placeholder="Optional" /></div>
-    <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button><button class="btn btn-primary btn-block" id="addex-save">Log activity</button></div>`;
-  document.getElementById('modal-backdrop').classList.add('open');
-  const typeEl = document.getElementById('addex-type'), durEl = document.getElementById('addex-duration'), calEl = document.getElementById('addex-calories');
-  const recompute = () => { if (userOverride) return; calEl.value = estimateExerciseCalories(typeEl.value, parseInt(durEl.value) || 0, getCurrentWeight(state)); };
-  typeEl.addEventListener('change', recompute);
-  durEl.addEventListener('input', recompute);
-  calEl.addEventListener('input', () => { userOverride = true; });
-  document.getElementById('modal-cancel').addEventListener('click', closeModal);
-  document.getElementById('addex-save').addEventListener('click', () => {
-    const typeId = typeEl.value, dur = parseInt(durEl.value), cal = parseInt(calEl.value);
-    const note = document.getElementById('addex-note').value.trim();
-    if (isNaN(dur) || dur < 1 || dur > 600) return toast('Duration 1-600 min');
-    if (isNaN(cal) || cal < 0 || cal > 3000) return toast('Calories 0-3000');
-    const t = getExerciseTypeById(typeId);
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const exercise = { id: Date.now(), date: todayISO(), time, type: typeId, typeName: t.name, typeEmoji: t.emoji, duration: dur, caloriesBurned: cal, note, source: 'manual' };
-    state.exercises.push(exercise);
-    recordAction({ type: 'create-exercise', exercise });
-    saveState(); closeModal(); toast(`Logged ${t.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('today');
-  });
+
+  const render = () => {
+    const t = getExerciseTypeById(selectedTypeId);
+    const defaultDur = 30;
+    const defaultCal = estimateExerciseCalories(selectedTypeId, defaultDur, getCurrentWeight(state));
+    modal.innerHTML = `<div class="modal-h">Log activity</div>
+      <div class="modal-sub">Logged exercise feeds into your weekly calibration. Estimates are conservative — most trackers overestimate by 30%.</div>
+      <div class="exercise-preset-grid">
+        ${PRESETS.map(p => `<button class="exercise-preset-tile ${selectedTypeId === p.id || (p.id === 'other' && showFullSelector) ? 'active' : ''}" data-preset="${p.id}">
+          <div class="exercise-preset-emoji">${p.emoji}</div>
+          <div class="exercise-preset-name">${p.name}</div>
+        </button>`).join('')}
+      </div>
+      ${showFullSelector ? `
+        <div class="form-row"><div class="form-label">Activity</div><select class="form-select" id="addex-type">${EXERCISE_TYPES.map(et => `<option value="${et.id}" ${selectedTypeId === et.id ? 'selected' : ''}>${et.emoji} ${et.name}</option>`).join('')}</select></div>
+      ` : ''}
+      <div class="form-row form-row-2">
+        <div><div class="form-label">Duration (min)</div><input class="form-input" type="number" id="addex-duration" value="${defaultDur}" min="1" max="600" autofocus /></div>
+        <div><div class="form-label">Calories burned</div><input class="form-input" type="number" id="addex-calories" value="${defaultCal}" min="0" max="3000" /></div>
+      </div>
+      <div class="form-row"><div class="form-label">Note</div><input class="form-input" type="text" id="addex-note" placeholder="Optional" /></div>
+      <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button><button class="btn btn-primary btn-block" id="addex-save">Log ${t.name.toLowerCase()}</button></div>`;
+
+    document.getElementById('modal-backdrop').classList.add('open');
+
+    // Wire preset tiles
+    document.querySelectorAll('[data-preset]').forEach(el => {
+      el.addEventListener('click', () => {
+        const p = el.dataset.preset;
+        if (p === 'other') {
+          showFullSelector = true;
+          // Default to a non-walking type so the dropdown is meaningful
+          if (['walking', 'running', 'cycling', 'strength'].includes(selectedTypeId)) {
+            selectedTypeId = 'hiit';
+          }
+        } else {
+          showFullSelector = false;
+          selectedTypeId = p;
+        }
+        userOverride = false;
+        render();
+      });
+    });
+
+    // Wire dropdown if visible
+    const typeEl = document.getElementById('addex-type');
+    if (typeEl) {
+      typeEl.addEventListener('change', (e) => {
+        selectedTypeId = e.target.value;
+        userOverride = false;
+        // Don't full re-render — just update the calorie field below
+        const durEl = document.getElementById('addex-duration');
+        const calEl = document.getElementById('addex-calories');
+        if (durEl && calEl) {
+          calEl.value = estimateExerciseCalories(selectedTypeId, parseInt(durEl.value) || 0, getCurrentWeight(state));
+        }
+      });
+    }
+
+    const durEl = document.getElementById('addex-duration');
+    const calEl = document.getElementById('addex-calories');
+    durEl.addEventListener('input', () => {
+      if (userOverride) return;
+      calEl.value = estimateExerciseCalories(selectedTypeId, parseInt(durEl.value) || 0, getCurrentWeight(state));
+    });
+    calEl.addEventListener('input', () => { userOverride = true; });
+
+    document.getElementById('modal-cancel').addEventListener('click', closeModal);
+    document.getElementById('addex-save').addEventListener('click', () => {
+      const dur = parseInt(durEl.value), cal = parseInt(calEl.value);
+      const note = document.getElementById('addex-note').value.trim();
+      if (isNaN(dur) || dur < 1 || dur > 600) return toast('Duration 1-600 min');
+      if (isNaN(cal) || cal < 0 || cal > 3000) return toast('Calories 0-3000');
+      const t2 = getExerciseTypeById(selectedTypeId);
+      const now = new Date();
+      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const exercise = { id: Date.now(), date: todayISO(), time, type: selectedTypeId, typeName: t2.name, typeEmoji: t2.emoji, duration: dur, caloriesBurned: cal, note, source: 'manual' };
+      state.exercises.push(exercise);
+      recordAction({ type: 'create-exercise', exercise });
+      saveState(); closeModal(); toast(`Logged ${t2.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('today');
+    });
+  };
+
+  render();
 }
 
 function openDayDetail(date) {
@@ -2460,6 +2876,7 @@ function openSettings() {
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Tracker accuracy</div><div class="settings-row-detail">Most fitness trackers overestimate. Apply a haircut.</div><div style="display: flex; gap: 12px; align-items: center; margin-top: 14px;"><input type="range" id="settings-tracker-acc" min="30" max="100" step="5" value="${accPct}" style="flex: 1;" /><div style="font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--primary-dark); min-width: 60px; text-align: right;" id="settings-tracker-acc-val">${accPct}%</div></div>${suggested != null && Math.abs(suggested - acc) > 0.05 ? `<div style="margin-top: 12px; padding: 12px 14px; background: var(--accent-soft); border-radius: 8px; font-size: 12.5px; color: var(--warning-text);">Suggested: <strong>${Math.round(suggested * 100)}%</strong> would match reality. <button class="btn btn-sm btn-primary" id="apply-suggested-acc" style="margin-left: 8px; padding: 4px 12px; font-size: 11px;">Apply</button></div>` : ''}</div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Goal weight</div><div class="settings-row-detail">Currently ${state.user.goalWeight} lb.</div><div style="display: flex; gap: 8px; margin-top: 10px;"><input type="number" class="form-input" id="settings-goal" value="${state.user.goalWeight}" min="50" max="500" step="0.5" style="max-width: 140px;" /><button class="btn btn-secondary btn-sm" id="settings-save-goal">Update</button></div></div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Target loss rate</div><div class="settings-row-detail">0 = maintenance.</div><div style="display: flex; gap: 12px; align-items: center; margin-top: 14px;"><input type="range" id="settings-rate" min="0" max="200" step="25" value="${ratePct}" style="flex: 1;" /><div style="font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--primary-dark); min-width: 130px; text-align: right;" id="settings-rate-val">${rate.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span></div></div></div></div>
+      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Saved meals</div><div class="settings-row-detail">${(state.savedMeals && state.savedMeals.length) ? `${state.savedMeals.length} saved.` : 'None yet. When you parse a meal, click "★ Save as meal" to save it for one-tap re-logging.'}</div>${(state.savedMeals && state.savedMeals.length) ? `<div class="saved-meals-manage">${state.savedMeals.map(m => { const total = m.items.reduce((s,x)=>s+(parseInt(x.calories)||0),0); return `<div class="saved-meal-row"><div class="saved-meal-row-info"><div class="saved-meal-row-name">${escapeAttr(m.name)} <span class="saved-meal-row-cal">${total} cal</span></div><div class="saved-meal-row-detail">${escapeAttr(m.items.map(i => i.name).join(', '))}</div></div><button class="btn btn-secondary btn-sm" data-delete-saved="${m.id}">Delete</button></div>`; }).join('')}</div>` : ''}</div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Export your data</div><div class="settings-row-detail">JSON keeps everything; CSV for spreadsheets.</div><div style="font-size: 12px; color: ${exportColor}; font-weight: 700; margin-top: 8px;">${exportNote}</div><div style="display: flex; gap: 8px; margin-top: 10px;"><button class="btn btn-secondary btn-sm" id="export-json-btn">Export JSON</button><button class="btn btn-secondary btn-sm" id="export-csv-btn">Export CSV</button></div></div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Restore from auto-backup</div><div class="settings-row-detail">${bak ? `Auto-backup last saved ${bak}.` : 'No auto-backup yet.'}</div><button class="btn btn-secondary btn-sm" id="restore-backup-btn" style="margin-top: 10px;" ${!bak ? 'disabled' : ''}>Restore</button></div></div>
       <div class="settings-row"><div><div class="settings-row-label">Methodology</div><div class="settings-row-detail">How the calibration math works.</div></div><button class="btn btn-secondary btn-sm" id="open-methodology-btn">Read</button></div>
@@ -2489,6 +2906,18 @@ function openSettings() {
     rateSlider.addEventListener('change', (e) => { state.user.targetLossRate = parseInt(e.target.value) / 100; saveState(); toast(`Target rate: ${state.user.targetLossRate.toFixed(2)} lb/wk`); });
   }
   document.getElementById('settings-save-goal').addEventListener('click', () => { const v = parseFloat(document.getElementById('settings-goal').value); if (isNaN(v) || v < 50 || v > 500) return toast('Goal weight 50-500 lb'); state.user.goalWeight = v; saveState(); closeModal(); toast(`Goal weight: ${v} lb`); navigate(currentView); });
+  document.querySelectorAll('[data-delete-saved]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.deleteSaved);
+      const sm = (state.savedMeals || []).find(m => m.id === id);
+      if (!sm) return;
+      if (!confirm(`Delete saved meal "${sm.name}"?`)) return;
+      state.savedMeals = state.savedMeals.filter(m => m.id !== id);
+      saveState();
+      closeModal();
+      openSettings(); // reopen with refreshed list
+    });
+  });
 }
 
 function exportData(format) {

@@ -557,6 +557,305 @@ html, body {
 .today-logger-header .log-mode-tabs { margin-bottom: 0; }
 .today-logger .log-mode-tab { padding: 6px 14px; font-size: 11.5px; }
 
+/* Recent foods strip — one-tap chips for frequently-logged items */
+.recent-foods-strip {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border-soft);
+}
+.recent-foods-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.recent-foods-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--primary-softer);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text);
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
+  cursor: pointer;
+  max-width: 100%;
+}
+.recent-chip:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary-soft);
+}
+.recent-chip:active {
+  transform: scale(0.97);
+}
+.recent-chip-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.recent-chip-cal {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  background: var(--card);
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+}
+
+/* Search-as-you-type dropdown attached to the meal parser input */
+.today-log-input-wrap {
+  position: relative;
+}
+.food-search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.food-search-dropdown[hidden] { display: none; }
+.food-search-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.08s ease;
+}
+.food-search-item:hover,
+.food-search-item.active {
+  background: var(--primary-softer);
+}
+.food-search-name {
+  font-size: 13.5px;
+  color: var(--text);
+  font-weight: 500;
+}
+.food-search-cal {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* "Same as yesterday" button — shows when today is empty and yesterday has data */
+.copy-yesterday-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: var(--bg-warm);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
+}
+.copy-yesterday-btn:hover {
+  background: var(--accent-soft);
+}
+.copy-yesterday-btn:active {
+  transform: scale(0.99);
+}
+.copy-yesterday-icon {
+  font-size: 22px;
+  color: var(--accent);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.copy-yesterday-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.copy-yesterday-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.copy-yesterday-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* Saved meals strip — user-defined meal templates */
+.saved-meals-strip {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border-soft);
+}
+.saved-meals-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.saved-meals-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.saved-meal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
+}
+.saved-meal-chip::before {
+  content: '★';
+  color: var(--accent);
+  font-size: 11px;
+  margin-right: -2px;
+}
+.saved-meal-chip:hover {
+  background: var(--primary-soft);
+}
+.saved-meal-chip:active {
+  transform: scale(0.97);
+}
+.saved-meal-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.saved-meal-cal {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  background: var(--card);
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+}
+
+/* Exercise preset tiles in the "Log activity" modal */
+.exercise-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.exercise-preset-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 14px 6px;
+  background: var(--bg-soft);
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease;
+}
+.exercise-preset-tile:hover {
+  background: var(--primary-softer);
+}
+.exercise-preset-tile.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+.exercise-preset-tile:active {
+  transform: scale(0.97);
+}
+.exercise-preset-emoji {
+  font-size: 24px;
+  line-height: 1;
+}
+.exercise-preset-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+@media (max-width: 480px) {
+  .exercise-preset-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .exercise-preset-tile:nth-child(4),
+  .exercise-preset-tile:nth-child(5) {
+    /* On 3-col grid, tiles 4 and 5 wrap to a second row naturally */
+  }
+}
+
+/* Saved-meals management list (in Settings) */
+.saved-meals-manage {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.saved-meal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+}
+.saved-meal-row-info {
+  flex: 1;
+  min-width: 0;
+}
+.saved-meal-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.saved-meal-row-cal {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.saved-meal-row-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ============================================
    TREND VIEW
    ============================================ */
