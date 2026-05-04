@@ -430,6 +430,305 @@ html, body {
   align-items: start;
 }
 
+/* ============================================
+   DIARY VIEW — date nav + stream + totals
+   ============================================ */
+
+/* Use the same 2-col grid for diary as today */
+.diary-grid {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+/* Date navigation row */
+.diary-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.diary-nav-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-soft);
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.diary-nav-btn:hover {
+  background: var(--primary-softer);
+  border-color: var(--primary-soft);
+}
+.diary-nav-btn:active { transform: scale(0.97); }
+.diary-nav-cal svg { color: var(--primary-dark); }
+.diary-cal-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.diary-nav-center {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: 0 4px;
+  flex: 1;
+}
+.diary-nav-label {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--primary-dark);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.diary-nav-date {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+}
+.diary-nav-today {
+  padding: 6px 14px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  border: 1px solid var(--primary-soft);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.diary-nav-today:hover {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+.diary-greeting {
+  margin-top: 6px;
+}
+
+/* The diary stream card */
+.diary-card {
+  padding: 22px 26px;
+}
+.diary-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.diary-count {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.diary-stream {
+  display: flex;
+  flex-direction: column;
+}
+.diary-empty {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* Single diary entry row */
+.diary-entry {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background 0.12s ease;
+}
+.diary-entry:last-of-type { border-bottom: none; }
+.diary-entry.clickable { cursor: pointer; }
+.diary-entry.clickable:hover {
+  background: var(--primary-softer);
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: var(--radius-sm);
+}
+.diary-entry-time {
+  font-size: 11px;
+  color: var(--muted-soft);
+  min-width: 50px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.diary-entry-body {
+  flex: 1;
+  min-width: 0;
+}
+.diary-entry-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diary-entry-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.diary-entry-cal {
+  font-size: 13.5px;
+  font-weight: 600;
+  min-width: 70px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.diary-entry-cal .cal-unit {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-left: 2px;
+}
+.diary-entry-burn {
+  color: var(--primary);
+}
+.diary-entry-water {
+  color: var(--muted-soft);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+.diary-entry-water-name,
+.diary-entry-note-text {
+  color: var(--muted);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Daily totals block at the bottom of the diary stream */
+.diary-totals {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--bg-soft);
+  border-radius: var(--radius-sm);
+}
+.diary-totals-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.diary-totals-row-macros {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.diary-totals-cell { min-width: 0; }
+.diary-totals-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+}
+.diary-totals-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary-dark);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.diary-totals-value-sm {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-soft);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.diary-totals-muted { color: var(--muted); }
+
+/* Water quick-add chips */
+.water-quick-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.water-quick-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+.water-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  border: 1px solid var(--primary-light);
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.12s ease, transform 0.05s ease;
+}
+.water-chip:hover { background: var(--primary); color: var(--card); border-color: var(--primary); }
+.water-chip:active { transform: scale(0.97); }
+
+/* Add-row at the bottom of the diary card (Activity / Water buttons) */
+.diary-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* AI input placeholder buttons (mic/camera) — disabled until Phase 2 */
+.ai-input-btn {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-softer);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--muted-soft);
+  cursor: not-allowed;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+.ai-input-btn[disabled] { pointer-events: auto; }
+.ai-input-btn:hover { background: var(--bg-soft); }
+
+/* Single-column on narrow screens */
+@media (max-width: 900px) {
+  .diary-grid { grid-template-columns: 1fr; gap: 20px; }
+  .diary-nav-label { font-size: 20px; }
+  .diary-card { padding: 18px 20px; }
+}
+@media (max-width: 480px) {
+  .diary-totals-row { grid-template-columns: repeat(2, 1fr); }
+  .diary-entry-time { min-width: 42px; }
+  .diary-entry-cal { min-width: 56px; }
+  .diary-nav-today { padding: 4px 10px; font-size: 11px; }
+}
+
 /* Calorie ring card */
 .ring-card {
   background: linear-gradient(160deg, var(--primary-soft) 0%, var(--bg-warm) 100%);

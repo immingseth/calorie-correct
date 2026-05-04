@@ -497,7 +497,7 @@ function makeBlankState() {
       trackerAccuracy: 1.0,
       targetLossRate: 1.0,
     },
-    weights: [], meals: [], exercises: [], dayNotes: {}, savedMeals: [],
+    weights: [], meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [],
     onboarded: false,
   };
 }
@@ -522,6 +522,7 @@ function migrateState(s) {
   if (s.user.targetLossRate == null) s.user.targetLossRate = 1.0; // lb/week
   if (!s.dayNotes) s.dayNotes = {}; // map of dateISO → note text
   if (!Array.isArray(s.savedMeals)) s.savedMeals = []; // user-defined meal templates
+  if (!Array.isArray(s.water)) s.water = []; // water log: array of { id, date, time, oz }
   return s;
 }
 
@@ -557,6 +558,9 @@ function resetToBlank(profile) {
     weights: [{ date: todayISO(), weight: profile.startWeight }],
     meals: [],
     exercises: [],
+    dayNotes: {},
+    savedMeals: [],
+    water: [],
     onboarded: true,
   };
   saveState();
@@ -831,6 +835,62 @@ function getMealsForDate(s, date) {
   return s.meals
     .filter(m => m.date === date)
     .sort((a, b) => a.time.localeCompare(b.time));
+}
+
+/* Water log entries for a given date, sorted by time. */
+function getWaterForDate(s, date) {
+  return (s.water || [])
+    .filter(w => w.date === date)
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+}
+
+/* Sum total water (oz) logged for a date. */
+function getDailyWater(s, date) {
+  return getWaterForDate(s, date).reduce((sum, w) => sum + (parseInt(w.oz) || 0), 0);
+}
+
+/* Sum macros across all meals on a date. Items may have protein_g/carbs_g/fat_g
+ * (added by Claude in Phase 2; existing items have only calories). Returns
+ * { protein, carbs, fat } in grams, summed across items that have those fields. */
+function getDailyMacros(s, date) {
+  const meals = getMealsForDate(s, date);
+  let protein = 0, carbs = 0, fat = 0;
+  for (const m of meals) {
+    for (const item of (m.items || [])) {
+      if (item.protein_g != null) protein += parseFloat(item.protein_g) || 0;
+      if (item.carbs_g != null) carbs += parseFloat(item.carbs_g) || 0;
+      if (item.fat_g != null) fat += parseFloat(item.fat_g) || 0;
+    }
+  }
+  return {
+    protein: Math.round(protein),
+    carbs: Math.round(carbs),
+    fat: Math.round(fat),
+  };
+}
+
+/* Returns all entries for a date as a chronologically sorted array.
+ * Each entry has shape: { kind, time, ...fields }
+ * Used by the Diary view to render meals + activity + weight + water + notes
+ * in a single time-sorted stream. */
+function getDayEntries(s, date) {
+  const entries = [];
+  for (const m of getMealsForDate(s, date)) {
+    entries.push({ kind: 'meal', time: m.time, data: m });
+  }
+  for (const e of getExercisesForDate(s, date)) {
+    entries.push({ kind: 'exercise', time: e.time || '12:00', data: e });
+  }
+  const w = s.weights.find(x => x.date === date);
+  if (w) entries.push({ kind: 'weight', time: w.time || '07:00', data: w });
+  for (const wat of getWaterForDate(s, date)) {
+    entries.push({ kind: 'water', time: wat.time || '12:00', data: wat });
+  }
+  if (s.dayNotes && s.dayNotes[date]) {
+    entries.push({ kind: 'note', time: '23:59', data: { date, text: s.dayNotes[date] } });
+  }
+  entries.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  return entries;
 }
 
 /* Recent foods — most-frequently-logged item names from the last 30 days,
@@ -1562,6 +1622,39 @@ const ICON = {
    ROUTER & UNDO
    =================================================== */
 let currentView = 'today';
+/* Diary view's currently-shown date. Persists across navigation within a session
+ * but resets to today on page reload. Use getSelectedDate() to read it (lazy
+ * default to today if not initialized). */
+let selectedDate = null;
+function getSelectedDate() {
+  if (!selectedDate) selectedDate = todayISO();
+  return selectedDate;
+}
+function setSelectedDate(iso) {
+  selectedDate = iso;
+}
+function shiftSelectedDate(deltaDays) {
+  const d = parseISODate(getSelectedDate());
+  d.setDate(d.getDate() + deltaDays);
+  selectedDate = formatDateISO(d);
+}
+/* Human-friendly label for the selected date.
+ * Today / Yesterday / Tomorrow / "Last Thursday" (within ~6 days back) /
+ * full date for anything older. */
+function getSelectedDateLabel() {
+  const sel = getSelectedDate();
+  const today = todayISO();
+  if (sel === today) return 'Today';
+  const todayD = parseISODate(today);
+  const selD = parseISODate(sel);
+  const diff = Math.round((selD - todayD) / 86400000);
+  if (diff === -1) return 'Yesterday';
+  if (diff === 1) return 'Tomorrow';
+  if (diff >= -6 && diff < 0) {
+    return 'Last ' + selD.toLocaleDateString('en-US', { weekday: 'long' });
+  }
+  return selD.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+}
 const VIEW_RENDERERS = {};
 
 function navigate(view) {
@@ -1631,12 +1724,14 @@ let todayLogTab = 'describe';
 let todayParseDraft = null;
 
 VIEW_RENDERERS.today = function (c) {
+  const date = getSelectedDate();
   const today = todayISO();
+  const isToday = date === today;
+  const isFuture = date > today;
   const target = getDailyTarget(state);
-  const consumed = getDailyCalories(state, today);
+  const consumed = getDailyCalories(state, date);
   const remaining = target - consumed;
   const pct = Math.max(0, Math.min(1, consumed / target));
-  const meals = getMealsForDate(state, today);
   const currentW = getCurrentWeight(state);
   const startW = state.user.startWeight;
   const totalLoss = startW - currentW;
@@ -1644,18 +1739,42 @@ VIEW_RENDERERS.today = function (c) {
   const rate7 = get7dRate(state);
   const progress = getGoalProgress(state);
   const rateStat = rateStatus(rate7);
-  const todaysBurnRaw = getDailyExerciseBurn(state, today);
+  const dayBurnRaw = getDailyExerciseBurn(state, date);
   const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
-  const todaysBurnAdj = Math.round(todaysBurnRaw * trackerAcc);
-  const todaysNet = consumed - todaysBurnAdj;
-  const netVsTarget = todaysNet - target;
+  const dayBurnAdj = Math.round(dayBurnRaw * trackerAcc);
+  const dayNet = consumed - dayBurnAdj;
+  const netVsTarget = dayNet - target;
   const netStat = consumed === 0 ? '' : netVsTarget <= 0 ? 'good' : netVsTarget < 200 ? 'warn' : 'bad';
   const circumference = 2 * Math.PI * 90;
+  const entries = getDayEntries(state, date);
+  const macros = getDailyMacros(state, date);
+  const waterTotal = getDailyWater(state, date);
+
+  // Greeting only when viewing today (otherwise the date nav is enough)
+  const greeting = (() => {
+    if (!isToday) return '';
+    const h = new Date().getHours();
+    if (h < 12) return `Good morning, ${state.user.name}.`;
+    if (h < 18) return `Good afternoon, ${state.user.name}.`;
+    return `Good evening, ${state.user.name}.`;
+  })();
 
   c.innerHTML = `
     <div class="view-header">
-      <div class="view-eyebrow">${formatHumanDate(today).toUpperCase()}</div>
-      <div class="view-title">Good morning, ${state.user.name}.</div>
+      <div class="diary-nav">
+        <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
+        <div class="diary-nav-center">
+          <div class="diary-nav-label">${getSelectedDateLabel()}</div>
+          <div class="diary-nav-date">${formatHumanDate(date)}</div>
+        </div>
+        <button class="diary-nav-btn" id="diary-next" title="Next day" ${isToday && isFuture ? '' : ''}>›</button>
+        <button class="diary-nav-btn diary-nav-cal" id="diary-cal" title="Pick a date">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </button>
+        <input type="date" id="diary-cal-input" class="diary-cal-input" value="${date}" />
+        ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
+      </div>
+      ${greeting ? `<div class="view-title diary-greeting">${greeting}</div>` : ''}
     </div>
     <div class="stat-row">
       <div class="stat-card dark">
@@ -1674,15 +1793,15 @@ VIEW_RENDERERS.today = function (c) {
         <div class="stat-detail">${rate7 == null ? 'need 4+ weight entries' : 'target: 0.5–2 lb/wk loss'}</div>
       </div>
       <div class="stat-card ${netStat}">
-        <div class="stat-label">Net Today</div>
-        <div class="stat-value">${consumed === 0 ? '—' : todaysNet.toLocaleString()}<span class="unit">cal</span></div>
-        <div class="stat-detail">${consumed === 0 ? 'no intake logged yet' : todaysBurnAdj > 0 ? `${consumed.toLocaleString()} in − ${todaysBurnAdj.toLocaleString()} burned · target ${target.toLocaleString()}` : `target ${target.toLocaleString()} · log activity to see net`}</div>
+        <div class="stat-label">Net ${isToday ? 'Today' : 'This Day'}</div>
+        <div class="stat-value">${consumed === 0 ? '—' : dayNet.toLocaleString()}<span class="unit">cal</span></div>
+        <div class="stat-detail">${consumed === 0 ? (isToday ? 'no intake logged yet' : 'nothing logged this day') : dayBurnAdj > 0 ? `${consumed.toLocaleString()} in − ${dayBurnAdj.toLocaleString()} burned · target ${target.toLocaleString()}` : `target ${target.toLocaleString()}${isToday ? ' · log activity to see net' : ''}`}</div>
       </div>
     </div>
     ${renderProgressCard(progress)}
-    ${renderPlateauBanner(state)}
-    <div class="today-grid">
-      <div>
+    ${isToday ? renderPlateauBanner(state) : ''}
+    <div class="diary-grid">
+      <div class="diary-side">
         <div class="ring-card">
           <div class="ring-svg-wrap">
             <svg class="ring-svg" viewBox="0 0 200 200">
@@ -1694,52 +1813,222 @@ VIEW_RENDERERS.today = function (c) {
               <div class="ring-label">${remaining >= 0 ? 'CAL LEFT' : 'OVER BY ' + Math.abs(remaining)}</div>
             </div>
           </div>
-          <div class="ring-budget"><strong>${consumed.toLocaleString()}</strong> of <strong>${target.toLocaleString()}</strong> logged today</div>
+          <div class="ring-budget"><strong>${consumed.toLocaleString()}</strong> of <strong>${target.toLocaleString()}</strong> logged ${isToday ? 'today' : 'this day'}</div>
           <div class="ring-target-meta">Target ${cal.ready ? 'calibrated to your trend' : 'using starting estimate'}</div>
-          ${todaysBurnRaw > 0 ? `<div class="ring-exercise-line">+${todaysBurnRaw} cal burned today · ${getExercisesForDate(state, today).length} ${getExercisesForDate(state, today).length === 1 ? 'activity' : 'activities'}${trackerAcc < 1.0 ? ` · ${todaysBurnAdj} after ${Math.round(trackerAcc * 100)}% haircut` : ''}</div>` : ''}
+          ${dayBurnRaw > 0 ? `<div class="ring-exercise-line">+${dayBurnRaw} cal burned · ${getExercisesForDate(state, date).length} ${getExercisesForDate(state, date).length === 1 ? 'activity' : 'activities'}${trackerAcc < 1.0 ? ` · ${dayBurnAdj} after ${Math.round(trackerAcc * 100)}% haircut` : ''}</div>` : ''}
         </div>
       </div>
-      <div>
-        <div class="card">
-          <div class="section-h">Today's meals</div>
-          <div class="meal-list">
-            ${meals.length ? meals.map(m => `
-              <div class="meal-item clickable" data-meal-id="${m.id}">
-                <div class="meal-time">${formatTime12(m.time)}</div>
-                <div class="meal-body">
-                  <div class="meal-name">${m.items.map(i => i.name).join(', ')}</div>
-                  <div class="meal-detail">${m.mealType} · ${m.source === 'ai' ? 'parsed from text' : m.source}</div>
-                </div>
-                <div class="meal-cal">${m.totalCal}</div>
-              </div>
-            `).join('') : '<div style="text-align: center; padding: 20px 0; color: var(--muted); font-size: 14px;">Nothing logged yet today.</div>'}
+      <div class="diary-main">
+        <div class="card diary-card">
+          <div class="diary-header">
+            <div class="section-h" style="margin: 0;">Diary${!isToday ? ` · ${getSelectedDateLabel().toLowerCase()}` : ''}</div>
+            <div class="diary-count">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</div>
           </div>
+          <div class="diary-stream">
+            ${entries.length ? entries.map(renderDiaryEntry).join('') : '<div class="diary-empty">Nothing logged for this day yet.</div>'}
+          </div>
+          ${renderDailyTotalsBlock(consumed, dayBurnAdj, dayNet, target, macros, waterTotal)}
           ${renderTodayLogger()}
+          ${renderWaterQuickAdd()}
+          <div class="diary-add-row">
+            <button class="btn btn-secondary btn-sm" id="add-exercise-shortcut">+ Log activity</button>
+            <button class="btn btn-secondary btn-sm" id="add-water-shortcut">+ Water</button>
+          </div>
         </div>
-        ${(() => {
-          const todaysExercises = getExercisesForDate(state, today);
-          if (todaysExercises.length === 0) {
-            return `<div class="activity-card"><div class="section-h">Today's activity</div><div class="meal-empty" id="add-exercise-shortcut"><span>+ Log activity</span></div></div>`;
-          }
-          return `<div class="activity-card"><div class="section-h">Today's activity</div>${todaysExercises.map(e => `
-            <div class="exercise-item clickable" data-exercise-id="${e.id}">
-              <div class="exercise-emoji">${e.typeEmoji || '💪'}</div>
-              <div class="exercise-body">
-                <div class="exercise-name">${e.typeName || e.type}</div>
-                <div class="exercise-detail">${e.duration > 0 ? formatTime12(e.time) + ' · ' + e.duration + ' min' : 'tracker daily total'}${e.note ? ' · ' + e.note : ''}</div>
-              </div>
-              <div class="exercise-burn">+${e.caloriesBurned}</div>
-            </div>`).join('')}<div class="meal-empty" id="add-exercise-shortcut" style="margin-top: 8px;"><span>+ Log activity</span></div></div>`;
-        })()}
       </div>
     </div>`;
 
+  // Wire date navigation
+  document.getElementById('diary-prev').addEventListener('click', () => { shiftSelectedDate(-1); navigate(currentView); });
+  document.getElementById('diary-next').addEventListener('click', () => { shiftSelectedDate(1); navigate(currentView); });
+  const calBtn = document.getElementById('diary-cal');
+  const calInput = document.getElementById('diary-cal-input');
+  if (calBtn && calInput) {
+    calBtn.addEventListener('click', () => calInput.showPicker ? calInput.showPicker() : calInput.click());
+    calInput.addEventListener('change', (e) => { if (e.target.value) { setSelectedDate(e.target.value); navigate(currentView); } });
+  }
+  const todayBtn = document.getElementById('diary-today');
+  if (todayBtn) todayBtn.addEventListener('click', () => { setSelectedDate(todayISO()); navigate(currentView); });
+
+  // Wire entry edit handlers
   c.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
   c.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
+  c.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
+  c.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
+
+  // Wire add buttons
   const addEx = document.getElementById('add-exercise-shortcut');
   if (addEx) addEx.addEventListener('click', () => openExerciseAdd());
+  const addWat = document.getElementById('add-water-shortcut');
+  if (addWat) addWat.addEventListener('click', () => openWaterAdd());
+
   wireTodayLogger();
+  wireWaterQuickAdd();
 };
+
+/* Add a water entry to the selected date. Used by the quick-add chips. */
+function addWaterEntry(oz) {
+  if (!Array.isArray(state.water)) state.water = [];
+  const date = getSelectedDate();
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const entry = { id: Date.now(), date, time, oz: parseInt(oz) || 0 };
+  state.water.push(entry);
+  saveState();
+  toast(`+${oz} oz water`);
+  navigate(currentView);
+}
+
+/* Modal: log a custom water amount. */
+function openWaterAdd() {
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `<div class="modal-h">Log water</div><div class="modal-sub">${formatHumanDate(getSelectedDate())}</div>
+    <div class="form-row"><div class="form-label">Amount (oz)</div><input class="form-input" type="number" id="water-add-oz" value="16" min="1" max="200" step="1" autofocus /></div>
+    <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button><button class="btn btn-primary btn-block" id="water-add-save">Log it</button></div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+  setTimeout(() => { const el = document.getElementById('water-add-oz'); if (el) el.focus(); }, 50);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  const save = () => {
+    const v = parseInt(document.getElementById('water-add-oz').value);
+    if (isNaN(v) || v < 1 || v > 200) return toast('Amount must be 1-200 oz');
+    closeModal();
+    addWaterEntry(v);
+  };
+  document.getElementById('water-add-save').addEventListener('click', save);
+  document.getElementById('water-add-oz').addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+}
+
+/* Modal: edit / delete a water entry. */
+function openWaterEdit(id) {
+  const w = (state.water || []).find(x => x.id === id);
+  if (!w) return;
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `<div class="modal-h">Edit water</div><div class="modal-sub">${formatHumanDate(w.date)} at ${formatTime12(w.time || '12:00')}</div>
+    <div class="form-row"><div class="form-label">Amount (oz)</div><input class="form-input" type="number" id="water-edit-oz" value="${w.oz}" min="1" max="200" step="1" /></div>
+    <div class="modal-actions modal-actions-3"><button class="btn btn-danger" id="water-edit-delete">Delete</button><button class="btn btn-secondary" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="water-edit-save">Save</button></div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('water-edit-delete').addEventListener('click', () => {
+    if (!confirm('Delete this water entry?')) return;
+    state.water = state.water.filter(x => x.id !== id);
+    saveState(); closeModal(); toast('Water entry deleted'); navigate(currentView);
+  });
+  document.getElementById('water-edit-save').addEventListener('click', () => {
+    const v = parseInt(document.getElementById('water-edit-oz').value);
+    if (isNaN(v) || v < 1 || v > 200) return toast('Amount must be 1-200 oz');
+    const idx = state.water.findIndex(x => x.id === id);
+    if (idx >= 0) state.water[idx].oz = v;
+    saveState(); closeModal(); toast('Water entry updated'); navigate(currentView);
+  });
+}
+
+/* Render one entry in the diary stream. Different shapes per kind. */
+function renderDiaryEntry(entry) {
+  const t = formatTime12(entry.time || '12:00');
+  if (entry.kind === 'meal') {
+    const m = entry.data;
+    const itemNames = m.items.map(i => i.name).join(', ');
+    // Sum macros across items in this meal (where present)
+    let p = 0, c = 0, f = 0, hasMacros = false;
+    for (const it of m.items) {
+      if (it.protein_g != null) { p += parseFloat(it.protein_g) || 0; hasMacros = true; }
+      if (it.carbs_g != null)   { c += parseFloat(it.carbs_g) || 0;   hasMacros = true; }
+      if (it.fat_g != null)     { f += parseFloat(it.fat_g) || 0;     hasMacros = true; }
+    }
+    const macroLine = hasMacros ? `<div class="diary-entry-meta">P ${Math.round(p)} · C ${Math.round(c)} · F ${Math.round(f)}</div>` : '';
+    return `<div class="diary-entry diary-entry-meal clickable" data-meal-id="${m.id}">
+      <div class="diary-entry-time">${t}</div>
+      <div class="diary-entry-body">
+        <div class="diary-entry-name">${escapeAttr(itemNames)}</div>
+        ${macroLine}
+      </div>
+      <div class="diary-entry-cal">${m.totalCal} <span class="cal-unit">cal</span></div>
+    </div>`;
+  }
+  if (entry.kind === 'exercise') {
+    const e = entry.data;
+    const detail = e.duration > 0 ? `${e.duration} min` : 'tracker daily total';
+    return `<div class="diary-entry diary-entry-exercise clickable" data-exercise-id="${e.id}">
+      <div class="diary-entry-time">${t}</div>
+      <div class="diary-entry-body">
+        <div class="diary-entry-name">${e.typeEmoji || '💪'} ${escapeAttr(e.typeName || e.type)} · ${detail}</div>
+        ${e.note ? `<div class="diary-entry-meta">${escapeAttr(e.note)}</div>` : ''}
+      </div>
+      <div class="diary-entry-cal diary-entry-burn">−${e.caloriesBurned} <span class="cal-unit">cal</span></div>
+    </div>`;
+  }
+  if (entry.kind === 'weight') {
+    const w = entry.data;
+    return `<div class="diary-entry diary-entry-weight clickable" data-weight-date="${w.date}">
+      <div class="diary-entry-time">${t}</div>
+      <div class="diary-entry-body">
+        <div class="diary-entry-name">Weighed in · <strong>${w.weight.toFixed(1)} lb</strong></div>
+      </div>
+      <div class="diary-entry-cal diary-entry-water">weight</div>
+    </div>`;
+  }
+  if (entry.kind === 'water') {
+    const w = entry.data;
+    return `<div class="diary-entry diary-entry-water clickable" data-water-id="${w.id}">
+      <div class="diary-entry-time">${t}</div>
+      <div class="diary-entry-body">
+        <div class="diary-entry-name diary-entry-water-name">${w.oz} oz water</div>
+      </div>
+      <div class="diary-entry-cal diary-entry-water">water</div>
+    </div>`;
+  }
+  if (entry.kind === 'note') {
+    const n = entry.data;
+    return `<div class="diary-entry diary-entry-note">
+      <div class="diary-entry-time">${t}</div>
+      <div class="diary-entry-body">
+        <div class="diary-entry-name diary-entry-note-text">Note · ${escapeAttr(n.text)}</div>
+      </div>
+      <div class="diary-entry-cal diary-entry-water">note</div>
+    </div>`;
+  }
+  return '';
+}
+
+/* Daily totals block — shown at the bottom of the diary stream.
+ * Calories in / burned / net / target, plus macros + water totals. */
+function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) {
+  const hasMacros = macros.protein > 0 || macros.carbs > 0 || macros.fat > 0;
+  return `<div class="diary-totals">
+    <div class="diary-totals-row">
+      <div class="diary-totals-cell"><div class="diary-totals-label">Total in</div><div class="diary-totals-value">${consumed.toLocaleString()}</div></div>
+      <div class="diary-totals-cell"><div class="diary-totals-label">Burned</div><div class="diary-totals-value">${burned.toLocaleString()}</div></div>
+      <div class="diary-totals-cell"><div class="diary-totals-label">Net</div><div class="diary-totals-value">${consumed === 0 ? '—' : net.toLocaleString()}</div></div>
+      <div class="diary-totals-cell"><div class="diary-totals-label">Target</div><div class="diary-totals-value diary-totals-muted">${target.toLocaleString()}</div></div>
+    </div>
+    <div class="diary-totals-row diary-totals-row-macros">
+      <div class="diary-totals-cell"><div class="diary-totals-label">Protein</div><div class="diary-totals-value-sm">${hasMacros ? macros.protein + ' g' : '—'}</div></div>
+      <div class="diary-totals-cell"><div class="diary-totals-label">Carbs</div><div class="diary-totals-value-sm">${hasMacros ? macros.carbs + ' g' : '—'}</div></div>
+      <div class="diary-totals-cell"><div class="diary-totals-label">Fat</div><div class="diary-totals-value-sm">${hasMacros ? macros.fat + ' g' : '—'}</div></div>
+      <div class="diary-totals-cell"><div class="diary-totals-label">Water</div><div class="diary-totals-value-sm">${waterOz > 0 ? waterOz + ' oz' : '—'}</div></div>
+    </div>
+  </div>`;
+}
+
+/* Quick-add water buttons (8 / 16 / 32 oz) shown inline in the logger area. */
+function renderWaterQuickAdd() {
+  return `<div class="water-quick-add">
+    <span class="water-quick-label">Water:</span>
+    <button class="water-chip" data-water-add="8">8 oz</button>
+    <button class="water-chip" data-water-add="12">12 oz</button>
+    <button class="water-chip" data-water-add="16">16 oz</button>
+    <button class="water-chip" data-water-add="32">32 oz</button>
+  </div>`;
+}
+
+function wireWaterQuickAdd() {
+  document.querySelectorAll('[data-water-add]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const oz = parseInt(btn.dataset.waterAdd);
+      addWaterEntry(oz);
+    });
+  });
+}
 
 function renderProgressCard(progress) {
   if (progress.totalToLose < 0.5) return '';
@@ -1810,7 +2099,7 @@ function logRecentFood(idx) {
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const meal = {
     id: Date.now(),
-    date: todayISO(),
+    date: getSelectedDate(),
     time,
     mealType: guessMealType(now.getHours()),
     raw: food.name,
@@ -1836,14 +2125,15 @@ function wireRecentFoodsStrip() {
 /* "Same as yesterday" — shows if today is empty and yesterday has data.
  * Copies all of yesterday's meals (with new IDs but original times) and
  * exercises to today's date. Useful for routine days. */
-function getYesterdayISO() {
-  const today = parseISODate(todayISO());
-  const y = new Date(today.getTime() - 86400000);
+function getDayBeforeISO(dateISO) {
+  const d = parseISODate(dateISO);
+  const y = new Date(d.getTime() - 86400000);
   return formatDateISO(y);
 }
 
 function getCopyYesterdaySummary() {
-  const yISO = getYesterdayISO();
+  // "Yesterday" relative to currently-selected date
+  const yISO = getDayBeforeISO(getSelectedDate());
   const meals = state.meals.filter(m => m.date === yISO);
   const exercises = (state.exercises || []).filter(e => e.date === yISO);
   if (meals.length === 0 && exercises.length === 0) return null;
@@ -1853,10 +2143,10 @@ function getCopyYesterdaySummary() {
 }
 
 function renderCopyYesterdayCard() {
-  // Only show when today has no meals yet
-  const today = todayISO();
-  const todayMeals = state.meals.filter(m => m.date === today);
-  if (todayMeals.length > 0) return '';
+  // Only show when the SELECTED day has no meals yet
+  const selDate = getSelectedDate();
+  const dayMeals = state.meals.filter(m => m.date === selDate);
+  if (dayMeals.length > 0) return '';
   const summary = getCopyYesterdaySummary();
   if (!summary) return '';
   const itemBits = [];
@@ -1874,26 +2164,26 @@ function renderCopyYesterdayCard() {
 function copyYesterdayToToday() {
   const summary = getCopyYesterdaySummary();
   if (!summary) return;
-  const today = todayISO();
+  const targetDate = getSelectedDate();
   // Confirm to avoid surprise
-  if (!confirm(`Copy yesterday's ${summary.meals.length} meals and ${summary.exercises.length} workouts to today?`)) return;
+  if (!confirm(`Copy ${summary.meals.length} meals and ${summary.exercises.length} workouts from the day before to ${targetDate === todayISO() ? 'today' : targetDate}?`)) return;
   let baseId = Date.now();
   const newMeals = summary.meals.map(m => ({
     ...m,
     id: ++baseId,
-    date: today,
+    date: targetDate,
     items: m.items.map(i => ({ ...i })),
     source: 'copied',
   }));
   const newExercises = summary.exercises.map(e => ({
     ...e,
     id: ++baseId,
-    date: today,
+    date: targetDate,
   }));
   state.meals.push(...newMeals);
   state.exercises = (state.exercises || []).concat(newExercises);
   saveState();
-  toast(`Copied ${newMeals.length} meals and ${newExercises.length} workouts from yesterday.`);
+  toast(`Copied ${newMeals.length} meals and ${newExercises.length} workouts from the day before.`);
   navigate('today');
 }
 
@@ -1928,7 +2218,7 @@ function logSavedMeal(savedId) {
   const totalCal = saved.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
   const meal = {
     id: Date.now(),
-    date: todayISO(),
+    date: getSelectedDate(),
     time,
     mealType: guessMealType(now.getHours()),
     raw: saved.name,
@@ -1977,7 +2267,7 @@ function logFoodFromSearch(name, cal) {
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const meal = {
     id: Date.now(),
-    date: todayISO(),
+    date: getSelectedDate(),
     time,
     mealType: guessMealType(now.getHours()),
     raw: name,
@@ -2007,8 +2297,14 @@ function renderTodayLogger() {
     ${renderSavedMealsStrip()}
     ${todayLogTab === 'describe' ? `
       <div class="today-log-input-wrap">
-        <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 6px; align-items: center;">
           <input class="input" id="today-log-input" placeholder="e.g. turkey sandwich and an apple" autocomplete="off" ${showParseResult ? 'disabled' : ''} />
+          <button class="ai-input-btn" disabled title="Voice logging — coming soon with Claude AI" aria-label="Voice (coming soon)">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          <button class="ai-input-btn" disabled title="Photo logging — coming soon with Claude AI" aria-label="Photo (coming soon)">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>
           <button class="btn btn-primary btn-sm" id="today-parse-btn" ${showParseResult ? 'disabled' : ''}>Parse</button>
         </div>
         <div class="food-search-dropdown" id="today-search-dropdown" hidden></div>
@@ -2170,7 +2466,7 @@ function wireTodayLogger() {
       const label = document.getElementById('today-numeric-label').value.trim() || `${mealType.charAt(0).toUpperCase() + mealType.slice(1)} (manual)`;
       const now = new Date();
       const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const meal = { id: Date.now(), date: todayISO(), time, mealType, raw: label, items: [{ name: label, calories: cal, source: 'manual' }], totalCal: cal, source: 'manual' };
+      const meal = { id: Date.now(), date: getSelectedDate(), time, mealType, raw: label, items: [{ name: label, calories: cal, source: 'manual' }], totalCal: cal, source: 'manual' };
       state.meals.push(meal);
       recordAction({ type: 'create-meal', meal });
       saveState();
@@ -2187,7 +2483,7 @@ function saveTodayParse() {
   const totalCal = todayParseDraft.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
   const now = new Date();
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const meal = { id: Date.now(), date: todayISO(), time, mealType: todayParseDraft.mealType, raw: todayParseDraft.text, items: todayParseDraft.items, totalCal, source: 'ai' };
+  const meal = { id: Date.now(), date: getSelectedDate(), time, mealType: todayParseDraft.mealType, raw: todayParseDraft.text, items: todayParseDraft.items, totalCal, source: 'ai' };
   state.meals.push(meal);
   recordAction({ type: 'create-meal', meal });
   saveState();
@@ -2767,7 +3063,7 @@ function openExerciseAdd() {
       const t2 = getExerciseTypeById(selectedTypeId);
       const now = new Date();
       const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const exercise = { id: Date.now(), date: todayISO(), time, type: selectedTypeId, typeName: t2.name, typeEmoji: t2.emoji, duration: dur, caloriesBurned: cal, note, source: 'manual' };
+      const exercise = { id: Date.now(), date: getSelectedDate(), time, type: selectedTypeId, typeName: t2.name, typeEmoji: t2.emoji, duration: dur, caloriesBurned: cal, note, source: 'manual' };
       state.exercises.push(exercise);
       recordAction({ type: 'create-exercise', exercise });
       saveState(); closeModal(); toast(`Logged ${t2.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('today');
@@ -3216,7 +3512,7 @@ function completeOnboarding() {
   state = {
     user: { name: d.name || 'You', sex: d.sex, age: d.age, heightInches: d.heightFt * 12 + d.heightIn, startWeight: d.startWeight, goalWeight: d.goalWeight, startDate: today, scalePref: d.scalePref, activityLevel: d.activityLevel || 'light', trackerAccuracy: d.trackerAccuracy != null ? d.trackerAccuracy : 1.0, targetLossRate: d.targetLossRate != null ? d.targetLossRate : 1.0, trackerSource: d.trackerSource || 'none' },
     weights: [{ date: today, weight: d.startWeight }],
-    meals: [], exercises: [], dayNotes: {}, onboarded: true, isDemo: false,
+    meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [], onboarded: true, isDemo: false,
   };
   saveState();
   const overlay = document.getElementById('onboarding-overlay');
