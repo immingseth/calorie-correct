@@ -666,12 +666,12 @@ function generateDemoData() {
 
   return {
     user: {
-      name: 'Sarah',
-      sex: 'F',
+      name: 'Average Joe',
+      sex: 'M',
       age: 38,
-      heightInches: 65,
+      heightInches: 70, // 5'10", roughly average for a US adult male
       startWeight: startW,
-      goalWeight: 155,
+      goalWeight: 175,
       startDate: startISO,
       activityLevel: 'light',
       trackerAccuracy: 1.0,
@@ -2868,7 +2868,7 @@ function openSettings() {
   const exportColor = exp.never || exp.overdue ? 'var(--danger)' : 'var(--muted)';
   modal.innerHTML = `<div class="modal-h">Settings</div><div class="modal-sub">${state.isDemo ? 'Currently using demo data.' : 'Using your own data.'}</div>
     <div>
-      <div class="settings-row"><div><div class="settings-row-label">Reset to demo data</div><div class="settings-row-detail">Loads Sarah's example.</div></div><button class="btn btn-secondary btn-sm" id="reset-demo-btn">Reset</button></div>
+      <div class="settings-row"><div><div class="settings-row-label">Reset to demo data</div><div class="settings-row-detail">Loads Average Joe's example.</div></div><button class="btn btn-secondary btn-sm" id="reset-demo-btn">Reset</button></div>
       <div class="settings-row"><div><div class="settings-row-label">Start fresh</div><div class="settings-row-detail">Clears all data, runs onboarding.</div></div><button class="btn btn-secondary btn-sm" id="start-fresh-btn">Start fresh</button></div>
       <div class="settings-row"><div><div class="settings-row-label">Import Seth's spreadsheet</div><div class="settings-row-detail">Loads 84 days of HEALTH data.</div></div><button class="btn btn-secondary btn-sm" id="import-seth-btn">Import</button></div>
       <div class="settings-row"><div><div class="settings-row-label">User profile</div><div class="settings-row-detail">${state.user.name}, ${state.user.sex === 'F' ? 'female' : 'male'}, ${state.user.age}, ${Math.floor(state.user.heightInches/12)}'${state.user.heightInches%12}"</div></div></div>
