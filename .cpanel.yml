@@ -8,5 +8,8 @@ deployment:
     - export DEPLOYPATH=/home4/sethimmi/caloriecorrect.com/
     # Copy the landing page
     - /bin/cp -R index.html $DEPLOYPATH
-    # Copy the app folder (with all its contents)
+    # Copy the logo and favicon at the project root (used by the landing page)
+    - /bin/cp -R cc-logo.png $DEPLOYPATH
+    - /bin/cp -R favicon.png $DEPLOYPATH
+    # Copy the app folder (with all its contents — includes its own logo/favicon)
     - /bin/cp -R app $DEPLOYPATH
