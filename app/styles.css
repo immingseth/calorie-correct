@@ -66,9 +66,12 @@ html, body {
   text-align: center;
 }
 .top-bar-brand {
-  display: inline-block;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   text-decoration: none;
-  line-height: 0; /* eliminate phantom inline-block descender space */
+  line-height: 1;
 }
 .top-bar .brand-logo {
   height: 64px;
@@ -1500,6 +1503,9 @@ html, body {
   display: inline-block;
   max-width: 100%;
   object-fit: contain;
+}
+.ob-topbar .ob-tag {
+  margin-top: 6px;
 }
 .ob-topbar .brand-name {
   font-family: var(--serif);

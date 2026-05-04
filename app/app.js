@@ -3059,7 +3059,7 @@ function renderOnboarding() {
     document.body.appendChild(overlay);
   }
   const stepName = OB_STEPS[obState.step];
-  overlay.innerHTML = `<div class="ob-topbar"><img class="brand-logo ob-logo" src="cc-logo.png" alt="Calorie Correct" /></div><div class="ob-content">${stepName !== 'welcome' && stepName !== 'done' ? renderObProgress() : ''}${renderObStep(stepName)}</div>`;
+  overlay.innerHTML = `<div class="ob-topbar"><img class="brand-logo ob-logo" src="cc-logo.png" alt="Calorie Correct" /><div class="brand-tag ob-tag">Accurate Tracking. Balanced Living.</div></div><div class="ob-content">${stepName !== 'welcome' && stepName !== 'done' ? renderObProgress() : ''}${renderObStep(stepName)}</div>`;
   wireObStep(stepName);
 }
 
