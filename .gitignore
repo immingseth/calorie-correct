@@ -1,0 +1,42 @@
+# =====================================================
+# Calorie Correct — git ignore
+# =====================================================
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Backup files (kept locally as safety, never versioned)
+*.bak
+*.simplified.bak
+*.orig
+
+# Old / scratch files we don't want in history
+zi7Utm3R
+*.zip
+deploy/
+calorie-correct-deploy/
+
+# Working / debugging artifacts
+app/app-test.js
+app/app-fresh.js
+app/sync-test.txt
+app/test-*.html
+
+# Local build / install
+node_modules/
+.cache/
+.tmp/
+
+# Mockups (reference only, not part of the app)
+# Keep these tracked so we have history; uncomment to exclude
+# mockup.html
+# onboarding.html
+
+# Anthropic / Claude session metadata (if it ever lands here)
+.claude/
+*.jsonl

@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calorie Correct — Product Mockup</title>
+<style>
+  :root {
+    --bg: #F5F1EA;
+    --bg-soft: #EFEAE0;
+    --card: #FFFFFF;
+    --primary: #5C7A6B;
+    --primary-dark: #4A6354;
+    --primary-soft: #EAF0EC;
+    --accent: #B8855E;
+    --accent-soft: #F4ECE2;
+    --text: #2C2826;
+    --text-soft: #4A4540;
+    --muted: #8A8278;
+    --border: #ECE5D8;
+    --border-soft: #F4EEE3;
+    --warning-bg: #F8EEDF;
+    --warning-text: #8B5A2B;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { background: var(--bg); }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    color: var(--text);
+    line-height: 1.5;
+    padding: 56px 24px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: 1500px; margin: 0 auto; }
+
+  /* --- Brand header --- */
+  .brand-header { text-align: center; margin-bottom: 56px; }
+  .logo {
+    font-family: 'Georgia', 'Iowan Old Style', serif;
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    letter-spacing: -1px;
+  }
+  .logo-dot { color: var(--accent); }
+  .logo-sep { color: var(--accent); font-weight: 400; margin: 0 0.32em; display: inline-block; transform: translateY(-0.05em); }
+  .tagline {
+    font-size: 19px;
+    color: var(--text-soft);
+    margin-top: 14px;
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.45;
+  }
+  .positioning {
+    display: inline-block;
+    margin-top: 28px;
+    padding: 7px 16px;
+    background: var(--accent-soft);
+    color: var(--warning-text);
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  /* --- Phones row --- */
+  .phones-row {
+    display: flex;
+    gap: 28px;
+    overflow-x: auto;
+    padding: 20px 8px 48px;
+    scroll-snap-type: x mandatory;
+  }
+  .phones-row::-webkit-scrollbar { height: 8px; }
+  .phones-row::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .phone-wrap {
+    flex-shrink: 0;
+    scroll-snap-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .screen-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    margin-bottom: 14px;
+    font-weight: 700;
+  }
+  .phone {
+    width: 300px;
+    background: #1a1a1a;
+    border-radius: 38px;
+    padding: 8px;
+    box-shadow: 0 24px 60px rgba(60, 50, 40, 0.14), 0 4px 12px rgba(60, 50, 40, 0.06);
+    transition: transform 0.25s ease;
+  }
+  .phone:hover { transform: translateY(-4px); }
+  .phone-screen {
+    background: var(--card);
+    border-radius: 30px;
+    overflow: hidden;
+    height: 612px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 22px 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .status-bar .icons { display: flex; gap: 5px; align-items: center; }
+  .signal { width: 14px; height: 9px; background: var(--text); -webkit-mask: linear-gradient(to right, var(--text) 25%, transparent 25% 33%, var(--text) 33% 58%, transparent 58% 66%, var(--text) 66% 91%, transparent 91% 100%); mask: linear-gradient(to right, var(--text) 25%, transparent 25% 33%, var(--text) 33% 58%, transparent 58% 66%, var(--text) 66% 91%, transparent 91% 100%); }
+  .battery { width: 22px; height: 11px; border: 1.2px solid var(--text); border-radius: 3px; position: relative; padding: 1px; }
+  .battery::after { content: ''; position: absolute; right: -3px; top: 3px; width: 1.5px; height: 4px; background: var(--text); border-radius: 0 1px 1px 0; }
+  .battery-fill { height: 100%; width: 80%; background: var(--text); border-radius: 1px; }
+
+  /* --- App layout --- */
+  .app {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 22px 80px;
+  }
+  .app::-webkit-scrollbar { width: 0; }
+  .app-header {
+    margin-top: 8px;
+    margin-bottom: 18px;
+  }
+  .app-date { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.4px; }
+  .app-greeting { font-family: 'Georgia', serif; font-size: 22px; color: var(--text); margin-top: 4px; letter-spacing: -0.3px; }
+  .app-h1 { font-family: 'Georgia', serif; font-size: 24px; color: var(--text); letter-spacing: -0.3px; }
+  .app-h2 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; margin-top: 22px; margin-bottom: 10px; }
+
+  /* --- Tab bar --- */
+  .tabbar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 64px;
+    background: var(--card);
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0 12px 12px;
+  }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 9.5px; color: var(--muted); font-weight: 600; letter-spacing: 0.3px; }
+  .tab.active { color: var(--primary); }
+  .tab-icon { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+  .tab svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* --- Calorie ring (today screen) --- */
+  .ring-card {
+    background: linear-gradient(135deg, var(--primary-soft) 0%, #F5F1EA 100%);
+    border-radius: 22px;
+    padding: 22px 20px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .ring-svg { width: 160px; height: 160px; margin: 0 auto; }
+  .ring-bg { fill: none; stroke: var(--border); stroke-width: 10; }
+  .ring-fg { fill: none; stroke: var(--primary); stroke-width: 10; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .ring-num { font-family: 'Georgia', serif; font-size: 36px; font-weight: 700; color: var(--text); }
+  .ring-label { font-size: 12px; color: var(--muted); margin-top: 2px; font-weight: 600; }
+  .ring-budget { font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+  .ring-budget strong { color: var(--text); font-weight: 700; }
+
+  /* --- Meal list --- */
+  .meal {
+    display: flex;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .meal:last-child { border-bottom: none; }
+  .meal-time { width: 56px; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .meal-body { flex: 1; }
+  .meal-name { font-size: 13.5px; color: var(--text); font-weight: 500; }
+  .meal-detail { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .meal-cal { font-size: 13.5px; color: var(--text); font-weight: 600; }
+  .meal-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    background: var(--bg-soft);
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .meal-empty .plus {
+    width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: white;
+    display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px;
+  }
+
+  /* --- Mini stat row --- */
+  .mini-stats { display: flex; gap: 10px; margin-top: 10px; }
+  .mini { flex: 1; padding: 12px 12px; background: var(--bg-soft); border-radius: 14px; }
+  .mini-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .mini-value { font-size: 16px; color: var(--text); font-weight: 700; margin-top: 4px; font-family: 'Georgia', serif; }
+  .mini-trend { font-size: 11px; color: var(--primary); margin-top: 2px; font-weight: 600; }
+
+  /* --- Trend screen --- */
+  .trend-headline {
+    margin-top: 8px;
+    margin-bottom: 18px;
+  }
+  .trend-num {
+    font-family: 'Georgia', serif;
+    font-size: 44px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    letter-spacing: -1.5px;
+    line-height: 1;
+  }
+  .trend-num-sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .chart-wrap {
+    background: var(--card);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    padding: 16px 14px 12px;
+    margin-bottom: 16px;
+  }
+  .chart-legend { display: flex; gap: 14px; margin-bottom: 10px; font-size: 10.5px; color: var(--muted); }
+  .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .legend-actual { background: var(--primary); }
+  .legend-predicted { background: var(--accent); }
+
+  .insight-card {
+    background: var(--warning-bg);
+    border-radius: 16px;
+    padding: 16px 16px 18px;
+    border-left: 3px solid var(--accent);
+  }
+  .insight-title {
+    font-size: 11px;
+    color: var(--warning-text);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .insight-body { font-size: 13.5px; color: var(--text); line-height: 1.55; }
+  .insight-body strong { font-weight: 700; }
+  .insight-footer { font-size: 11px; color: var(--muted); margin-top: 12px; font-style: italic; }
+
+  /* --- Log meal screen --- */
+  .log-input-wrap {
+    margin-top: 12px;
+    background: var(--bg-soft);
+    border-radius: 14px;
+    padding: 14px 14px;
+    border: 1px solid var(--border);
+  }
+  .log-input-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; margin-bottom: 8px; }
+  .log-input {
+    font-size: 14px;
+    color: var(--text);
+    background: white;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    line-height: 1.4;
+  }
+  .log-input .typing-cursor { display: inline-block; width: 1.5px; height: 14px; background: var(--text); vertical-align: text-bottom; margin-left: 1px; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .log-input-action {
+    display: flex; gap: 8px; margin-top: 10px;
+  }
+  .icon-button {
+    flex: 1; padding: 10px; background: white; border: 1px solid var(--border); border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 12px; color: var(--text-soft); font-weight: 600;
+  }
+  .icon-button svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .parsed-section { margin-top: 22px; }
+  .parsed-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .parsed-header .ai-pill {
+    font-size: 9.5px; background: var(--primary); color: white;
+    padding: 3px 7px; border-radius: 100px; font-weight: 700; letter-spacing: 0.4px;
+  }
+  .parsed-header-text { font-size: 13px; color: var(--text-soft); }
+  .parsed-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    background: white;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .parsed-item-name { font-size: 13.5px; color: var(--text); font-weight: 500; }
+  .parsed-item-detail { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .parsed-item-cal { font-size: 13.5px; color: var(--text); font-weight: 700; }
+  .parsed-total {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 14px; margin-top: 8px;
+    background: var(--primary-soft); border-radius: 12px;
+  }
+  .parsed-total-label { font-size: 13px; color: var(--primary-dark); font-weight: 700; }
+  .parsed-total-cal { font-family: 'Georgia', serif; font-size: 18px; color: var(--primary-dark); font-weight: 700; }
+  .save-row { margin-top: 14px; display: flex; gap: 8px; }
+  .save-btn { flex: 1; padding: 13px; background: var(--primary); color: white; border-radius: 12px; font-size: 14px; font-weight: 700; text-align: center; }
+  .edit-btn { padding: 13px 18px; background: white; color: var(--text-soft); border: 1px solid var(--border); border-radius: 12px; font-size: 14px; font-weight: 600; text-align: center; }
+  .reassurance { font-size: 11px; color: var(--muted); margin-top: 14px; line-height: 1.5; font-style: italic; text-align: center; padding: 0 8px; }
+
+  /* --- Insight screen --- */
+  .insight-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; margin-bottom: 18px; font-weight: 500; }
+  .insight-prose p {
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 14px;
+    line-height: 1.6;
+  }
+  .insight-prose strong { color: var(--primary-dark); font-weight: 700; }
+  .insight-divider { height: 1px; background: var(--border-soft); margin: 18px 0; }
+  .insight-stat-row { display: flex; gap: 8px; margin-top: 14px; }
+  .insight-stat { flex: 1; padding: 12px; background: var(--bg-soft); border-radius: 12px; text-align: center; }
+  .insight-stat-num { font-family: 'Georgia', serif; font-size: 18px; font-weight: 700; color: var(--text); }
+  .insight-stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .methodology-link { font-size: 12px; color: var(--primary); font-weight: 600; margin-top: 16px; display: inline-block; }
+
+  /* --- Coach screen --- */
+  .coach-header {
+    display: flex; align-items: center; gap: 10px; margin-top: 4px; margin-bottom: 16px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--border-soft);
+  }
+  .coach-avatar {
+    width: 38px; height: 38px; border-radius: 50%; background: var(--primary-soft);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Georgia', serif; font-size: 17px; color: var(--primary-dark); font-weight: 700;
+  }
+  .coach-name { font-size: 14px; color: var(--text); font-weight: 700; }
+  .coach-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .coach-status .dot { display: inline-block; width: 6px; height: 6px; background: var(--primary); border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+  .bubble {
+    max-width: 80%;
+    padding: 11px 14px;
+    border-radius: 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+    word-wrap: break-word;
+  }
+  .bubble.user {
+    background: var(--primary);
+    color: white;
+    margin-left: auto;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble.coach {
+    background: var(--bg-soft);
+    color: var(--text);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble.coach p { margin-bottom: 8px; }
+  .bubble.coach p:last-child { margin-bottom: 0; }
+  .chat-input-bar {
+    position: absolute;
+    bottom: 64px;
+    left: 0; right: 0;
+    background: var(--card);
+    border-top: 1px solid var(--border-soft);
+    padding: 10px 18px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .chat-input {
+    flex: 1; padding: 9px 14px; background: var(--bg-soft); border-radius: 100px;
+    font-size: 12.5px; color: var(--muted);
+  }
+  .chat-send { width: 32px; height: 32px; border-radius: 50%; background: var(--primary); display: flex; align-items: center; justify-content: center; color: white; }
+  .chat-send svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* --- Below the phones --- */
+  .pillars {
+    margin-top: 60px;
+    background: var(--card);
+    border-radius: 24px;
+    padding: 48px 40px;
+    border: 1px solid var(--border-soft);
+  }
+  .pillars-h1 {
+    font-family: 'Georgia', serif;
+    font-size: 28px;
+    color: var(--text);
+    margin-bottom: 8px;
+    letter-spacing: -0.4px;
+  }
+  .pillars-sub { color: var(--muted); margin-bottom: 32px; font-size: 14px; max-width: 640px; }
+  .pillars-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 22px; }
+  .pillar-card { padding: 22px; background: var(--bg-soft); border-radius: 16px; }
+  .pillar-icon {
+    width: 36px; height: 36px;
+    background: var(--primary-soft); color: var(--primary-dark);
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 14px; font-family: 'Georgia', serif; font-weight: 700; font-size: 15px;
+  }
+  .pillar-h { font-size: 15px; color: var(--text); font-weight: 700; margin-bottom: 6px; }
+  .pillar-body { font-size: 13px; color: var(--text-soft); line-height: 1.55; }
+
+  .design-notes {
+    margin-top: 36px;
+    padding: 28px 32px;
+    background: var(--bg-soft);
+    border-radius: 16px;
+    font-size: 13px;
+    color: var(--text-soft);
+    line-height: 1.6;
+  }
+  .design-notes h3 {
+    font-family: 'Georgia', serif;
+    font-size: 16px;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .design-notes p { margin-bottom: 8px; }
+
+  .footer { text-align: center; margin-top: 48px; font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 720px) {
+    body { padding: 32px 12px 40px; }
+    .logo { font-size: 38px; }
+    .tagline { font-size: 16px; }
+    .pillars { padding: 28px 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Brand header -->
+  <div class="brand-header">
+    <div class="logo">Calorie<span class="logo-sep">·</span>Correct</div>
+    <div class="tagline">The honest calorie counter that calibrates to your real weight loss. Stop guessing. Start measuring.</div>
+    <div class="positioning">Working name · Mockup v0.1</div>
+  </div>
+
+  <!-- Phones row -->
+  <div class="phones-row">
+
+    <!-- ============================================== -->
+    <!-- SCREEN 1: TODAY -->
+    <!-- ============================================== -->
+    <div class="phone-wrap">
+      <div class="screen-label">Today</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="status-bar">
+            <span>9:42</span>
+            <span class="icons">
+              <span class="signal"></span>
+              <span class="battery"><div class="battery-fill"></div></span>
+            </span>
+          </div>
+          <div class="app">
+            <div class="app-header">
+              <div class="app-date">TUESDAY · MAY 5</div>
+              <div class="app-greeting">Good morning, Sarah.</div>
+            </div>
+
+            <div class="ring-card">
+              <svg class="ring-svg" viewBox="0 0 100 100">
+                <circle class="ring-bg" cx="50" cy="50" r="42"/>
+                <circle class="ring-fg" cx="50" cy="50" r="42"
+                  stroke-dasharray="263.9"
+                  stroke-dashoffset="58"/>
+                <text x="50" y="48" text-anchor="middle" class="ring-num" style="font-size:22px;">1,420</text>
+                <text x="50" y="62" text-anchor="middle" class="ring-label" style="font-size:8px;fill:#8A8278;">CAL LEFT</text>
+              </svg>
+              <div class="ring-budget"><strong>380</strong> of <strong>1,800</strong> logged · target updated Sunday</div>
+            </div>
+
+            <div class="mini-stats">
+              <div class="mini">
+                <div class="mini-label">Weight</div>
+                <div class="mini-value">187.4</div>
+                <div class="mini-trend">↓ 4.2 lbs total</div>
+              </div>
+              <div class="mini">
+                <div class="mini-label">7-day avg</div>
+                <div class="mini-value">1,594</div>
+                <div class="mini-trend">on track</div>
+              </div>
+            </div>
+
+            <div class="app-h2">Today</div>
+            <div class="meal">
+              <div class="meal-time">7:20a</div>
+              <div class="meal-body">
+                <div class="meal-name">Greek yogurt with berries</div>
+                <div class="meal-detail">parsed from text</div>
+              </div>
+              <div class="meal-cal">220</div>
+            </div>
+            <div class="meal">
+              <div class="meal-time">8:45a</div>
+              <div class="meal-body">
+                <div class="meal-name">Coffee with cream</div>
+                <div class="meal-detail">cached</div>
+              </div>
+              <div class="meal-cal">80</div>
+            </div>
+            <div class="meal">
+              <div class="meal-time">10:15a</div>
+              <div class="meal-body">
+                <div class="meal-name">Apple, medium</div>
+                <div class="meal-detail">cached</div>
+              </div>
+              <div class="meal-cal">80</div>
+            </div>
+            <div class="meal-empty">
+              <span>Add lunch</span>
+              <span class="plus">+</span>
+            </div>
+          </div>
+          <div class="tabbar">
+            <div class="tab active">
+              <svg viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+              Today
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+              Trend
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+              Log
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>
+              Insights
+            </div>
+            <div class="tab">
+              <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9c-1.6 0-3-.4-4.3-1L3 21l1-4.7A9 9 0 1121 12z"/></svg>
+              Coach
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- SCREEN 2: TREND / REALITY CHECK -->
+    <!-- ============================================== -->
+    <div class="phone-wrap">
+      <div class="screen-label">Reality Check</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="status-bar">
+            <span>9:42</span>
+            <span class="icons">
+              <span class="signal"></span>
+              <span class="battery"><div class="battery-fill"></div></span>
+            </span>
+          </div>
+          <div class="app">
+            <div class="app-header" style="margin-top: 4px;">
+              <div class="app-date">YOUR TREND</div>
+              <div class="app-h1">Down 4.2 lbs</div>
+              <div class="trend-num-sub">since you started, 32 days ago</div>
+            </div>
+
+            <div class="chart-wrap">
+              <div class="chart-legend">
+                <span><span class="legend-dot legend-actual"></span> Actual weight</span>
+                <span><span class="legend-dot legend-predicted"></span> What logging predicted</span>
+              </div>
+              <svg viewBox="0 0 260 130" style="width: 100%; height: auto; display: block;">
+                <!-- Grid lines -->
+                <line x1="20" y1="20" x2="250" y2="20" stroke="#F4EEE3" stroke-width="1"/>
+                <line x1="20" y1="60" x2="250" y2="60" stroke="#F4EEE3" stroke-width="1"/>
+                <line x1="20" y1="100" x2="250" y2="100" stroke="#F4EEE3" stroke-width="1"/>
+
+                <!-- Predicted (steeper, what logging said should happen) -->
+                <path d="M 20,28 L 250,98" stroke="#B8855E" stroke-width="2" stroke-dasharray="4 3" fill="none"/>
+
+                <!-- Actual weight (noisy line going down less steeply) -->
+                <polyline points="20,30 35,32 50,28 65,34 80,38 95,36 110,42 125,40 140,46 155,50 170,48 185,54 200,58 215,56 230,62 245,68"
+                  fill="none" stroke="#5C7A6B" stroke-width="2" stroke-linejoin="round"/>
+
+                <!-- Actual weight points -->
+                <g fill="#5C7A6B">
+                  <circle cx="20" cy="30" r="2"/>
+                  <circle cx="50" cy="28" r="2"/>
+                  <circle cx="80" cy="38" r="2"/>
+                  <circle cx="110" cy="42" r="2"/>
+                  <circle cx="140" cy="46" r="2"/>
+                  <circle cx="170" cy="48" r="2"/>
+                  <circle cx="200" cy="58" r="2"/>
+                  <circle cx="230" cy="62" r="2"/>
+                  <circle cx="245" cy="68" r="2.6"/>
+                </g>
+
+                <!-- Y axis labels -->
+                <text x="14" y="23" text-anchor="end" font-size="7" fill="#8A8278" font-family="Georgia">192</text>
+                <text x="14" y="63" text-anchor="end" font-size="7" fill="#8A8278" font-family="Georgia">189</text>
+                <text x="14" y="103" text-anchor="end" font-size="7" fill="#8A8278" font-family="Georgia">186</text>
+
+                <!-- X axis labels -->
+                <text x="20" y="120" text-anchor="middle" font-size="7" fill="#8A8278">Apr 1</text>
+                <text x="135" y="120" text-anchor="middle" font-size="7" fill="#8A8278">Apr 17</text>
+                <text x="245" y="120" text-anchor="middle" font-size="7" fill="#8A8278">May 3</text>
+              </svg>
+            </div>
+
+            <div class="insight-card">
+              <div class="insight-title">Calibration · updated Sunday</div>
+              <div class="insight-body">
+                Your logged intake says you should be down <strong>6.8 lbs</strong> by now. You're at <strong>4.2 lbs</strong>.
+                <br><br>
+                Your real intake is running about <strong>17% above</strong> what you're logging — most likely from portion sizes and uncounted extras.
+                <br><br>
+                We've adjusted your target to <strong>1,650 cal/day</strong>. That should match what you're actually eating and keep your deficit on track.
+              </div>
+              <div class="insight-footer">Nothing to fix. We just calibrate every Sunday.</div>
+            </div>
+
+            <div class="mini-stats" style="margin-top: 16px;">
+              <div class="mini">
+                <div class="mini-label">Avg loss / wk</div>
+                <div class="mini-value">0.92 lb</div>
+                <div class="mini-trend">healthy pace</div>
+              </div>
+              <div class="mini">
+                <div class="mini-label">Real TDEE</div>
+                <div class="mini-value">2,180</div>
+                <div class="mini-trend">your number</div>
+              </div>
+            </div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Today</div>
+            <div class="tab active"><svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>Trend</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Log</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>Insights</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9c-1.6 0-3-.4-4.3-1L3 21l1-4.7A9 9 0 1121 12z"/></svg>Coach</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- SCREEN 3: LOG A MEAL -->
+    <!-- ============================================== -->
+    <div class="phone-wrap">
+      <div class="screen-label">Log a Meal</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="status-bar">
+            <span>9:42</span>
+            <span class="icons">
+              <span class="signal"></span>
+              <span class="battery"><div class="battery-fill"></div></span>
+            </span>
+          </div>
+          <div class="app">
+            <div class="app-header" style="margin-top: 4px;">
+              <div class="app-h1">What did you eat?</div>
+              <div class="trend-num-sub">Type, talk, or snap a photo.</div>
+            </div>
+
+            <div class="log-input-wrap">
+              <div class="log-input-label">Lunch</div>
+              <div class="log-input">turkey sandwich on sourdough, an apple, and a Diet Coke<span class="typing-cursor"></span></div>
+              <div class="log-input-action">
+                <div class="icon-button">
+                  <svg viewBox="0 0 24 24"><path d="M12 1v22M5 8a7 7 0 1014 0V8M8 8h8"/></svg>
+                  Voice
+                </div>
+                <div class="icon-button">
+                  <svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/><path d="M8 6l1-2h6l1 2"/></svg>
+                  Photo
+                </div>
+              </div>
+            </div>
+
+            <div class="parsed-section">
+              <div class="parsed-header">
+                <span class="ai-pill">AI</span>
+                <span class="parsed-header-text">Here's what I picked up:</span>
+              </div>
+              <div class="parsed-item">
+                <div>
+                  <div class="parsed-item-name">Turkey sandwich, sourdough</div>
+                  <div class="parsed-item-detail">est. medium portion</div>
+                </div>
+                <div class="parsed-item-cal">420</div>
+              </div>
+              <div class="parsed-item">
+                <div>
+                  <div class="parsed-item-name">Apple, medium</div>
+                  <div class="parsed-item-detail">cached estimate</div>
+                </div>
+                <div class="parsed-item-cal">95</div>
+              </div>
+              <div class="parsed-item">
+                <div>
+                  <div class="parsed-item-name">Diet Coke, 12 oz</div>
+                  <div class="parsed-item-detail">label</div>
+                </div>
+                <div class="parsed-item-cal">0</div>
+              </div>
+              <div class="parsed-total">
+                <div class="parsed-total-label">Total</div>
+                <div class="parsed-total-cal">515 cal</div>
+              </div>
+            </div>
+
+            <div class="save-row">
+              <div class="save-btn">Save</div>
+              <div class="edit-btn">Edit</div>
+            </div>
+
+            <div class="reassurance">
+              Don't worry about exact portions. Calorie Correct calibrates against your weight trend, so consistency matters more than precision.
+            </div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Today</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>Trend</div>
+            <div class="tab active"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Log</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>Insights</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9c-1.6 0-3-.4-4.3-1L3 21l1-4.7A9 9 0 1121 12z"/></svg>Coach</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- SCREEN 4: SUNDAY INSIGHT -->
+    <!-- ============================================== -->
+    <div class="phone-wrap">
+      <div class="screen-label">Sunday Insight</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="status-bar">
+            <span>9:42</span>
+            <span class="icons">
+              <span class="signal"></span>
+              <span class="battery"><div class="battery-fill"></div></span>
+            </span>
+          </div>
+          <div class="app">
+            <div class="app-header" style="margin-top: 4px;">
+              <div class="app-date">YOUR WEEK · APR 27 – MAY 3</div>
+              <div class="app-h1">Your week, honestly.</div>
+              <div class="insight-meta">Generated Sunday morning. Reading time: 1 minute.</div>
+            </div>
+
+            <div class="insight-prose">
+              <p>You logged <strong>11,400 calories</strong> this week, an average of <strong>1,628/day</strong>. Your weight is down <strong>0.6 lbs</strong>. The math checks out — you're moving in the right direction at a healthy pace.</p>
+
+              <p>A few notes:</p>
+
+              <p>Wednesday's log showed 980 cal, which seems low for a normal day. Your weight didn't reflect a big deficit, so you probably under-logged a bit. Not a problem — just calibration data for me.</p>
+
+              <p>Weekend intake ran about 30% higher than weekdays. That's normal and fine. Your average is what moves the scale, not any single day.</p>
+
+              <p><strong>Recommendation:</strong> keep going. No changes this week.</p>
+            </div>
+
+            <div class="insight-divider"></div>
+
+            <div class="insight-stat-row">
+              <div class="insight-stat">
+                <div class="insight-stat-num">−0.6</div>
+                <div class="insight-stat-label">Weight Δ (lb)</div>
+              </div>
+              <div class="insight-stat">
+                <div class="insight-stat-num">1,628</div>
+                <div class="insight-stat-label">Avg cal/day</div>
+              </div>
+              <div class="insight-stat">
+                <div class="insight-stat-num">6/7</div>
+                <div class="insight-stat-label">Days logged</div>
+              </div>
+            </div>
+
+            <a class="methodology-link">How we calculate this →</a>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Today</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>Trend</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Log</div>
+            <div class="tab active"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>Insights</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9c-1.6 0-3-.4-4.3-1L3 21l1-4.7A9 9 0 1121 12z"/></svg>Coach</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- SCREEN 5: COACH CHAT -->
+    <!-- ============================================== -->
+    <div class="phone-wrap">
+      <div class="screen-label">Coach</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="status-bar">
+            <span>9:42</span>
+            <span class="icons">
+              <span class="signal"></span>
+              <span class="battery"><div class="battery-fill"></div></span>
+            </span>
+          </div>
+          <div class="app" style="padding-bottom: 130px;">
+            <div class="coach-header">
+              <div class="coach-avatar">RC</div>
+              <div>
+                <div class="coach-name">Calorie Correct Coach</div>
+                <div class="coach-status"><span class="dot"></span>here when you need it</div>
+              </div>
+            </div>
+
+            <div class="bubble user">
+              I've got a wedding Saturday. What should I do?
+            </div>
+            <div class="bubble coach">
+              <p>Don't bank calories all week — it usually backfires.</p>
+              <p>Eat normally Mon–Fri at your usual target. Saturday: light breakfast, normal lunch, focus on protein. Skip the morning mimosas. Then enjoy dinner and dessert.</p>
+              <p>One day above target won't move the scale. Your weekly average will. You'll be fine.</p>
+            </div>
+            <div class="bubble user">
+              What if I want to drink at the wedding?
+            </div>
+            <div class="bubble coach">
+              <p>Pick one drink type and stick with it — wine or one cocktail.</p>
+              <p>A glass of wine is ~125 cal. A margarita is ~250. The bigger trap is reduced inhibition around food, not the alcohol calories themselves.</p>
+              <p>Want me to log a placeholder for the wedding so you can see how the week shapes up?</p>
+            </div>
+          </div>
+          <div class="chat-input-bar">
+            <div class="chat-input">Ask anything...</div>
+            <div class="chat-send">
+              <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </div>
+          </div>
+          <div class="tabbar">
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>Today</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>Trend</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Log</div>
+            <div class="tab"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/><path d="M12 6v6l4 2"/></svg>Insights</div>
+            <div class="tab active"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9c-1.6 0-3-.4-4.3-1L3 21l1-4.7A9 9 0 1121 12z"/></svg>Coach</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <!-- /phones-row -->
+
+  <!-- Pillars -->
+  <div class="pillars">
+    <div class="pillars-h1">The whole idea, in three pieces.</div>
+    <div class="pillars-sub">Most calorie counters are only accurate if you're perfect. Most exercise apps overstate burn by 30–50%. Calorie Correct uses your weight trend as the ground truth, then calibrates everything else against it.</div>
+    <div class="pillars-grid">
+      <div class="pillar-card">
+        <div class="pillar-icon">1</div>
+        <div class="pillar-h">Log easy, not perfect.</div>
+        <div class="pillar-body">Type or snap a photo of your meal. Claude parses it. Don't sweat exact portions — consistency beats precision.</div>
+      </div>
+      <div class="pillar-card">
+        <div class="pillar-icon">2</div>
+        <div class="pillar-h">The scale tells the truth.</div>
+        <div class="pillar-body">Your weight trend is the ground truth. If you're not losing, your logging is off — and we'll show you by how much.</div>
+      </div>
+      <div class="pillar-card">
+        <div class="pillar-icon">3</div>
+        <div class="pillar-h">Calibrate weekly.</div>
+        <div class="pillar-body">Every Sunday we update your real intake estimate, your true TDEE, and your daily target. Math, not motivation.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Design notes for Seth -->
+  <div class="design-notes">
+    <h3>Design notes (for you, Seth)</h3>
+    <p><strong>Voice.</strong> "Nothing to fix, just calibrating." "You're moving in the right direction at a healthy pace." That's the brand. No exclamation points, no streaks, no "you crushed it." A doctor friend who happens to know what they're doing.</p>
+    <p><strong>The Reality Check screen is the moat.</strong> Two lines on one chart — predicted weight from logging vs. actual weight — is the visual that no other app shows you. That image alone could be the marketing.</p>
+    <p><strong>The "AI" pill on parsed meals is intentional.</strong> Sarah needs to feel that the magic is happening, but the rest of the app should feel like a well-designed tracker — not a chatbot in a trenchcoat.</p>
+    <p><strong>The coach is contextual, not infinite.</strong> Best version eventually surfaces proactive suggestions ("you're going to a wedding tomorrow — want to talk it through?") rather than waiting for the user to ask.</p>
+    <p><strong>What's missing here.</strong> Onboarding flow, weight entry screen, settings, paywall screen, dark mode. Easy to add — wanted to keep this v0.1 focused on the five screens that prove the concept.</p>
+  </div>
+
+  <div class="footer">Calorie Correct · concept mockup · iterate freely</div>
+
+</div>
+</body>
+</html>

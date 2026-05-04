@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calorie Correct — The honest calorie counter</title>
+<meta name="description" content="The honest calorie counter that calibrates to your real weight loss. Stop guessing — start measuring.">
+<style>
+  :root {
+    --bg: #F5F1EA;
+    --bg-soft: #EFEAE0;
+    --bg-warm: #FAF6EE;
+    --card: #FFFFFF;
+    --primary: #5C7A6B;
+    --primary-dark: #4A6354;
+    --primary-soft: #EAF0EC;
+    --accent: #B8855E;
+    --accent-soft: #F4ECE2;
+    --text: #2C2826;
+    --text-soft: #4A4540;
+    --muted: #8A8278;
+    --border: #ECE5D8;
+    --border-soft: #F4EEE3;
+    --warning-text: #8B5A2B;
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); }
+  body {
+    font-family: var(--sans);
+    color: var(--text);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+
+  /* === Top nav === */
+  .nav-bar {
+    background: var(--bg-warm);
+    border-bottom: 1px solid var(--border);
+    padding: 22px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .nav-brand {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    letter-spacing: -0.5px;
+    line-height: 1;
+  }
+  .nav-sep {
+    color: var(--accent);
+    font-weight: 400;
+    margin: 0 0.32em;
+    display: inline-block;
+    transform: translateY(-0.05em);
+  }
+  .nav-links {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .nav-link {
+    color: var(--text-soft);
+    transition: color 0.15s;
+  }
+  .nav-link:hover { color: var(--primary); }
+  .nav-cta {
+    background: var(--primary);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    transition: background 0.15s;
+  }
+  .nav-cta:hover { background: var(--primary-dark); color: white; }
+
+  /* === Sections === */
+  section { padding: 96px 32px; }
+  .container { max-width: 1100px; margin: 0 auto; }
+  .narrow { max-width: 760px; margin: 0 auto; }
+
+  /* === Hero === */
+  .hero {
+    padding: 120px 32px 100px;
+    text-align: center;
+  }
+  .hero-eyebrow {
+    display: inline-block;
+    padding: 8px 16px;
+    background: var(--accent-soft);
+    color: var(--warning-text);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    border-radius: 100px;
+    margin-bottom: 28px;
+  }
+  .hero-title {
+    font-family: var(--serif);
+    font-size: 76px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -2.5px;
+    line-height: 1.05;
+    margin-bottom: 28px;
+  }
+  .hero-title em {
+    font-style: italic;
+    color: var(--primary-dark);
+  }
+  .hero-sub {
+    font-size: 21px;
+    color: var(--text-soft);
+    line-height: 1.5;
+    max-width: 680px;
+    margin: 0 auto 40px;
+  }
+  .hero-ctas {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 32px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    transition: all 0.15s;
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+  }
+  .btn-primary:hover { background: var(--primary-dark); transform: translateY(-1px); box-shadow: 0 8px 20px rgba(74, 99, 84, 0.2); color: white; }
+  .btn-secondary {
+    background: var(--card);
+    color: var(--text);
+    border: 1.5px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--primary); color: var(--primary-dark); }
+
+  .hero-disclaimer {
+    margin-top: 28px;
+    font-size: 13px;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* === The problem section === */
+  .problem {
+    background: var(--bg-warm);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .problem-h2 {
+    font-family: var(--serif);
+    font-size: 44px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -1.2px;
+    line-height: 1.1;
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  .problem-sub {
+    font-size: 18px;
+    color: var(--text-soft);
+    line-height: 1.6;
+    text-align: center;
+    margin-bottom: 56px;
+  }
+  .problem-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .problem-card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 32px 28px;
+    border: 1px solid var(--border-soft);
+  }
+  .problem-card-num {
+    font-family: var(--serif);
+    font-size: 38px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+  }
+  .problem-card-h {
+    font-size: 17px;
+    color: var(--text);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .problem-card-body {
+    font-size: 14.5px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* === How it works === */
+  .how {
+    background: var(--bg);
+  }
+  .section-eyebrow {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+    font-weight: 700;
+    margin-bottom: 18px;
+  }
+  .section-h2 {
+    font-family: var(--serif);
+    font-size: 44px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -1.2px;
+    line-height: 1.1;
+    text-align: center;
+    margin-bottom: 56px;
+  }
+  .pillar-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .pillar {
+    text-align: left;
+  }
+  .pillar-num {
+    width: 44px;
+    height: 44px;
+    background: var(--primary-soft);
+    color: var(--primary-dark);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 18px;
+  }
+  .pillar-h {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--text);
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    margin-bottom: 10px;
+  }
+  .pillar-body {
+    font-size: 15px;
+    color: var(--text-soft);
+    line-height: 1.6;
+  }
+
+  /* === Built for === */
+  .builtfor {
+    background: var(--bg-warm);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .quote-card {
+    background: var(--card);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 16px 16px 0;
+    padding: 36px 40px;
+    margin-bottom: 14px;
+  }
+  .quote-text {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--text);
+    line-height: 1.5;
+    font-style: italic;
+    margin-bottom: 14px;
+  }
+  .quote-attr {
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .builtfor-list {
+    margin-top: 32px;
+  }
+  .audience-row {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .audience-row:last-child { border-bottom: none; }
+  .audience-icon {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    background: var(--primary-soft);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--serif);
+    color: var(--primary-dark);
+    font-weight: 700;
+  }
+  .audience-body {
+    flex: 1;
+  }
+  .audience-h {
+    font-size: 16px;
+    color: var(--text);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .audience-text {
+    font-size: 14.5px;
+    color: var(--text-soft);
+    line-height: 1.55;
+  }
+
+  /* === Final CTA === */
+  .final-cta {
+    text-align: center;
+    background: var(--bg);
+  }
+  .final-h {
+    font-family: var(--serif);
+    font-size: 56px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    letter-spacing: -1.8px;
+    line-height: 1.1;
+    margin-bottom: 18px;
+  }
+  .final-sub {
+    font-size: 18px;
+    color: var(--text-soft);
+    margin-bottom: 36px;
+    max-width: 540px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* === Footer === */
+  .footer {
+    padding: 40px 32px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    background: var(--bg-warm);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .footer-brand {
+    font-family: var(--serif);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin-bottom: 8px;
+  }
+
+  /* === Responsive === */
+  @media (max-width: 800px) {
+    section { padding: 64px 20px; }
+    .hero { padding: 64px 20px; }
+    .hero-title { font-size: 44px; letter-spacing: -1.5px; }
+    .hero-sub { font-size: 17px; }
+    .problem-h2, .section-h2 { font-size: 32px; }
+    .problem-grid, .pillar-grid { grid-template-columns: 1fr; }
+    .nav-bar { padding: 16px 20px; }
+    .nav-brand { font-size: 22px; }
+    .nav-links { gap: 14px; font-size: 13px; }
+    .final-h { font-size: 36px; }
+    .quote-card { padding: 28px 24px; }
+    .quote-text { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<nav class="nav-bar">
+  <div class="nav-brand">Calorie<span class="nav-sep">·</span>Correct</div>
+  <div class="nav-links">
+    <a class="nav-link" href="#how">How it works</a>
+    <a class="nav-link" href="#who">Who it's for</a>
+    <a class="nav-cta" href="app/index.html?onboard=1">Get started</a>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-eyebrow">The honest calorie counter</div>
+    <h1 class="hero-title">Stop guessing.<br>Start <em>measuring.</em></h1>
+    <p class="hero-sub">Most calorie apps are only accurate if you're perfect. Calorie Correct uses your real weight trend as the ground truth — and tells you, honestly, when your tracking is off.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="app/index.html?onboard=1">Get started — it's free</a>
+      <a class="btn btn-secondary" href="app/index.html">See it with sample data →</a>
+    </div>
+    <div class="hero-disclaimer">No account required. Your data lives on your device.</div>
+  </div>
+</section>
+
+<!-- ============ THE PROBLEM ============ -->
+<section class="problem">
+  <div class="container">
+    <h2 class="problem-h2">Other apps lie to you. Politely.</h2>
+    <p class="problem-sub narrow">Calorie tracking has a precision problem. Restaurant portions, cooking oil, label tolerances, and the BLT (bites, licks, tastes) all get missed. Exercise estimators are even worse. Most apps pretend everything's working — Calorie Correct shows you when it isn't.</p>
+    <div class="problem-grid">
+      <div class="problem-card">
+        <div class="problem-card-num">±20%</div>
+        <div class="problem-card-h">Calorie label tolerance</div>
+        <div class="problem-card-body">The FDA allows 20% slack on calorie labels. Restaurant meals are guesses. Your "1,800 cal day" might really be 2,200.</div>
+      </div>
+      <div class="problem-card">
+        <div class="problem-card-num">2×</div>
+        <div class="problem-card-h">Exercise overestimate</div>
+        <div class="problem-card-body">Smartwatches and gym machines routinely report twice the calories you actually burned. Then your app adds them back to your budget.</div>
+      </div>
+      <div class="problem-card">
+        <div class="problem-card-num">0</div>
+        <div class="problem-card-h">Apps that admit it</div>
+        <div class="problem-card-body">Most fitness apps are designed to feel good — streaks, badges, encouragement. They never tell you the math doesn't add up.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="how" id="how">
+  <div class="container">
+    <div class="section-eyebrow">HOW IT WORKS</div>
+    <h2 class="section-h2">Three pieces. That's the whole idea.</h2>
+    <div class="pillar-grid">
+      <div class="pillar">
+        <div class="pillar-num">1</div>
+        <h3 class="pillar-h">Log easy, not perfect.</h3>
+        <p class="pillar-body">Type or describe your meal in plain English. We parse it instantly — no scanning barcodes, no weighing chicken breasts, no fighting a clunky food database.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-num">2</div>
+        <h3 class="pillar-h">The scale tells the truth.</h3>
+        <p class="pillar-body">Weight is the ground truth. If you're not losing what your logging predicts, your real intake is higher than you think — and we'll show you by exactly how much.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-num">3</div>
+        <h3 class="pillar-h">Calibrate weekly.</h3>
+        <p class="pillar-body">Every Sunday we update your real intake estimate, your true metabolic rate, and your daily target. Math, not motivation. Adjusts to your body — not a textbook.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHO IT'S FOR ============ -->
+<section class="builtfor" id="who">
+  <div class="container">
+    <div class="section-eyebrow">WHO IT'S FOR</div>
+    <h2 class="section-h2">For people who want real results.</h2>
+
+    <div class="quote-card">
+      <div class="quote-text">"The scale will lie to you daily and tell you the truth weekly. We work on the truth."</div>
+      <div class="quote-attr">— OUR FIRST PRINCIPLE</div>
+    </div>
+
+    <div class="builtfor-list">
+      <div class="audience-row">
+        <div class="audience-icon">A</div>
+        <div class="audience-body">
+          <div class="audience-h">Anyone who's tried five diets and is tired of being lied to.</div>
+          <div class="audience-text">No streaks. No badges. No pep talks. Just the math, done well, with copy that respects your intelligence.</div>
+        </div>
+      </div>
+      <div class="audience-row">
+        <div class="audience-icon">B</div>
+        <div class="audience-body">
+          <div class="audience-h">Athletes who want their numbers to match reality.</div>
+          <div class="audience-text">Stop arguing with smartwatch calorie estimates. Get a true TDEE based on your actual weight changes, recalibrated every week.</div>
+        </div>
+      </div>
+      <div class="audience-row">
+        <div class="audience-icon">C</div>
+        <div class="audience-body">
+          <div class="audience-h">Nerds who like a real feedback loop.</div>
+          <div class="audience-text">If you've ever wished MyFitnessPal would close the loop between what you logged and what your body did — this is that app.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="final-cta">
+  <div class="container">
+    <h2 class="final-h">Try it now.</h2>
+    <p class="final-sub">Setup takes 90 seconds. No account needed. Your data stays on your device until we build the backend.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="app/index.html?onboard=1">Set up with my numbers</a>
+      <a class="btn btn-secondary" href="app/index.html">Just show me the demo →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="footer">
+  <div class="footer-brand">Calorie<span class="nav-sep">·</span>Correct</div>
+  <div>The honest calorie counter. Prototype build · 2026.</div>
+</footer>
+
+</body>
+</html>
