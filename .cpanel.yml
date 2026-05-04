@@ -1,0 +1,9 @@
+---
+deployment:
+  tasks:
+    # The web root on Bluehost. Trailing slash matters.
+    - export DEPLOYPATH=/home4/sethimmi/public_html/
+    # Copy the landing page
+    - /bin/cp -R index.html $DEPLOYPATH
+    # Copy the app folder (with all its contents)
+    - /bin/cp -R app $DEPLOYPATH
