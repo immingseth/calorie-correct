@@ -152,13 +152,61 @@ Out (see `.gitignore`):
 
 ## Branching strategy
 
-For a single-developer static site, this is light:
+**The lean workflow: commit straight to main, no feature branches.**
 
-- `main` — what's deployed to https://caloriecorrect.com. Always working.
-- `dev` (optional) — staging branch if I want to stack up several changes before promoting them
-- `fix-foo` / `feat-bar` — short-lived branches for any change that touches >1 file or feels risky
+There is only ever one branch in active use (`main`) and one folder (`C:\Users\immin\Documents\Claude\Projects\Calorie Correct\`). Two scripts in the project root automate everything:
 
-Merge to main only via the local terminal (`git merge`), not via GitHub PRs (no point in PRs for a solo dev). If you want a review step, that's what asking Claude to diff your changes is for.
+- **`ship.bat "message"`** — stages all changes, commits with the message, pushes to GitHub. One command for the entire git workflow.
+- **`rollback.bat`** — creates a revert commit that undoes the most recent ship, then pushes. Asks for confirmation before doing anything.
+
+**Standard deploy flow:**
+
+1. Claude makes changes to files locally (you wait while he works + smoke-tests)
+2. Open `app/index.html` in your browser, click through Today / Trend / Insights / Coach (1–2 min)
+3. In your terminal in the project folder, run:
+   ```
+   ship.bat "Short description of what changed"
+   ```
+4. Open Bluehost cPanel → Git Version Control → Manage on `calorie-correct`
+5. Click **Update from Remote**, then **Deploy HEAD Commit**
+6. Hard-refresh https://caloriecorrect.com in an incognito window to verify
+
+Total: 1 command + 2 clicks.
+
+**Rollback flow (when something breaks live):**
+
+1. In your terminal, run:
+   ```
+   rollback.bat
+   ```
+2. Confirm `y` when prompted
+3. cPanel: Update from Remote → Deploy HEAD Commit (same as a normal deploy)
+
+Total: 1 command + 2 clicks.
+
+**Where the safety comes from:**
+
+- Claude smoke-tests every change in JSDOM before reporting "ready to ship", catching JS syntax errors and obvious render bugs before they ever reach your machine
+- You test once locally in a real browser before running `ship.bat`, catching anything visual or interactive
+- If something still slips through, `rollback.bat` undoes it in one step. The live site goes back to the last known good version.
+- All commits stay in the GitHub history forever, so you can always inspect or revert any specific commit by hash if needed
+
+**When to use a feature branch instead:**
+
+Only when you want to abandon the work entirely without committing it to main. For example: experimenting with a major redesign you might throw away. In that case:
+
+```
+git checkout -b experiment/something
+# work happens
+git checkout main           # Throws away everything; never merged
+git branch -D experiment/something
+```
+
+For everything else — including big multi-file feature batches like the logging overhaul — commit to main directly. Claude's pre-commit testing handles the safety.
+
+**What about a staging environment?**
+
+Not yet. For static-site changes that you can fully test by opening `app/index.html` locally, a staging deploy adds friction without much new safety. The real bugs that would justify staging (server-side caching, HTTPS-only behaviors, cross-browser issues we can't reproduce locally) haven't bitten us. If they do, we'll add a `staging` branch and a `caloriecorrect.com/staging/` deploy then.
 
 ---
 
