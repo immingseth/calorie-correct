@@ -2320,8 +2320,8 @@ function renderTrendChart(s, cal, range) {
   trendChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { labels, datasets: [
-      { label: 'Daily', data: rawData, borderColor: 'rgba(92, 122, 107, 0.30)', pointBackgroundColor: '#5C7A6B', pointRadius: 2.5, borderWidth: 1.2, fill: false, order: 3 },
-      { label: '7-day avg', data: smoothedData, borderColor: '#4A6354', backgroundColor: 'rgba(74, 99, 84, 0.05)', borderWidth: 3, tension: 0.3, pointRadius: 0, fill: true, order: 1 },
+      { label: 'Daily', data: rawData, borderColor: 'rgba(118, 155, 108, 0.30)', pointBackgroundColor: '#769B6C', pointRadius: 2.5, borderWidth: 1.2, fill: false, order: 3 },
+      { label: '7-day avg', data: smoothedData, borderColor: '#446957', backgroundColor: 'rgba(68, 105, 87, 0.05)', borderWidth: 3, tension: 0.3, pointRadius: 0, fill: true, order: 1 },
       { label: 'Predicted from logging', data: predictedData, borderColor: '#B8855E', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, order: 2 },
       { label: 'Goal', data: goalData, borderColor: 'rgba(138, 130, 120, 0.6)', borderWidth: 1.5, borderDash: [2, 4], pointRadius: 0, fill: false, order: 4 },
     ]},
@@ -2360,7 +2360,7 @@ function renderCalorieBarChart(s, adherence, range) {
     else if (cal >= spikeThreshold) colors.push('#8B3F37');
     else if (cal > target + 200) colors.push('#B65D4F');
     else if (cal > target) colors.push('#C9885A');
-    else colors.push('#5C7A6B');
+    else colors.push('#769B6C');
   }
   const targetCeiling = labels.map(() => target);
   const targetFloor = labels.map(() => target * 0.85);

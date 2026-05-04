@@ -7,10 +7,12 @@
   --bg-soft: #EFEAE0;
   --bg-warm: #FAF6EE;
   --card: #FFFFFF;
-  --primary: #5C7A6B;
-  --primary-dark: #4A6354;
-  --primary-soft: #EAF0EC;
-  --primary-softer: #F2F6F3;
+  /* Brand greens — sampled from the Calorie Correct favicon (3-tone pie chart) */
+  --primary: #769B6C;          /* medium green (bottom-right slice of favicon) */
+  --primary-dark: #446957;     /* darkest green (largest slice of favicon) */
+  --primary-light: #9DBA82;    /* lightest green (top-right slice of favicon) */
+  --primary-soft: #EAF0EC;     /* near-white sage tint, used for hover/soft fills */
+  --primary-softer: #F2F6F3;   /* extra-pale sage tint */
   --accent: #B8855E;
   --accent-soft: #F4ECE2;
   --text: #2C2826;
@@ -23,7 +25,7 @@
   --warning-text: #8B5A2B;
   --danger: #B65D4F;
   /* status colors for stat cards / metrics */
-  --status-good: #5C7A6B;
+  --status-good: #769B6C;      /* matches new --primary */
   --status-good-bg: #EAF0EC;
   --status-warn: #C9885A;
   --status-warn-bg: #F8EEDF;
