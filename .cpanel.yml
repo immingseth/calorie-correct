@@ -1,8 +1,11 @@
 ---
 deployment:
   tasks:
-    # The web root on Bluehost. Trailing slash matters.
-    - export DEPLOYPATH=/home4/sethimmi/public_html/
+    # The web root on Bluehost for the caloriecorrect.com addon domain.
+    # NOTE: This is /caloriecorrect.com/, NOT /public_html/. The latter is the
+    # docroot for the primary domain (sethimming.com). Addon domains have
+    # their own separate docroots under the home directory.
+    - export DEPLOYPATH=/home4/sethimmi/caloriecorrect.com/
     # Copy the landing page
     - /bin/cp -R index.html $DEPLOYPATH
     # Copy the app folder (with all its contents)
