@@ -472,6 +472,7 @@ const STORAGE_KEY = 'realcal_state_v1';
 const STORAGE_BACKUP_KEY = 'realcal_state_v1_backup';
 const STORAGE_BACKUP_TIME_KEY = 'realcal_state_v1_backup_time';
 const STORAGE_LAST_EXPORT_KEY = 'realcal_last_export';
+const STORAGE_CHAT_KEY = 'realcal_chat_v1'; // last conversation turn — persists across reloads so the Coach bubble doesn't vanish
 const TODAY_OVERRIDE = null; // production: use real today's date
 
 let state = null;
@@ -510,6 +511,7 @@ function restoreFromBackup() {
   try {
     state = migrateState(JSON.parse(backup));
     localStorage.setItem(STORAGE_KEY, backup);
+    setLastTurn(null);
     return true;
   } catch (e) {
     return false;
@@ -543,6 +545,7 @@ function saveState() {
 function resetToDemoData() {
   state = generateDemoData();
   saveState();
+  setLastTurn(null);
 }
 
 function resetToBlank(profile) {
@@ -1656,8 +1659,36 @@ let currentView = 'diary';
 /* Coach chat state — persists for the session, resets on page reload.
  * lastTurn holds the most-recent user input and coach response, displayed
  * as a single-turn chat bubble above the input on Diary and Results. */
-let lastTurn = null; // { user: string, coach: string, kind: 'log' | 'coach' | 'error' }
+let lastTurn = null; // { user: string, coach: string, kind: 'log' | 'coach' | 'error', greeting?: bool }
 let chatRefocusOnNextRender = false; // set true after a submit/chip click so focus returns to the input
+
+/* Persistence helpers for the Coach chat surface.
+ * lastTurn lives in its own localStorage key (separate from app state) because
+ * it's transient UX state, not user data. Loaded on init so the bubble survives
+ * page reloads. Pattern is intentionally extensible — when Claude API is wired
+ * up, this becomes the foundation for full conversation history. */
+function loadLastTurn() {
+  try {
+    const raw = localStorage.getItem(STORAGE_CHAT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+function saveLastTurn() {
+  try {
+    if (lastTurn) {
+      localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(lastTurn));
+    } else {
+      localStorage.removeItem(STORAGE_CHAT_KEY);
+    }
+  } catch (e) { /* localStorage full or disabled — fail silently */ }
+}
+function setLastTurn(turn) {
+  lastTurn = turn;
+  saveLastTurn();
+}
 /* Diary view's currently-shown date. Persists across navigation within a session
  * but resets to today on page reload. Use getSelectedDate() to read it (lazy
  * default to today if not initialized). */
@@ -1923,12 +1954,12 @@ function seedDailyGreetingIfNeeded() {
   const today = todayISO();
   if (state.user.lastGreetingDate === today) return;
   if (lastTurn) return; // user already started a conversation
-  lastTurn = {
+  setLastTurn({
     user: '',
     coach: coachDailyGreeting(state),
     kind: 'coach',
     greeting: true,
-  };
+  });
   state.user.lastGreetingDate = today;
   saveState();
 }
@@ -2029,18 +2060,18 @@ function wireChatStrip() {
       state.meals.push(meal);
       recordAction({ type: 'create-meal', meal });
       saveState();
-      lastTurn = {
+      setLastTurn({
         user: text,
         coach: coachLogResponse(meal, getSelectedDate()),
         kind: 'log',
-      };
+      });
     } else {
       // Treat as a question / coaching input
-      lastTurn = {
+      setLastTurn({
         user: text,
         coach: coachQuestionResponse(text),
         kind: 'coach',
-      };
+      });
     }
 
     inp.value = '';
@@ -2081,11 +2112,11 @@ function wireChatStrip() {
       state.meals.push(meal);
       recordAction({ type: 'create-meal', meal });
       saveState();
-      lastTurn = {
+      setLastTurn({
         user: food.name,
         coach: coachLogResponse(meal, getSelectedDate()),
         kind: 'log',
-      };
+      });
       chatRefocusOnNextRender = true;
       navigate(currentView);
     });
@@ -4019,9 +4050,10 @@ function importSethSpreadsheet() {
   saveState();
   document.getElementById('user-name').textContent = state.user.name;
   document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
+  setLastTurn(null);
   closeModal();
   toast(`Imported ${newState.weights.length} weights, ${newState.meals.length} days intake, ${newState.exercises.length} days exercise.`);
-  navigate('trend');
+  navigate('diary');
 }
 
 /* ===================================================
@@ -4210,6 +4242,7 @@ function completeOnboarding() {
     meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [], onboarded: true, isDemo: false,
   };
   saveState();
+  setLastTurn(null);
   const overlay = document.getElementById('onboarding-overlay');
   if (overlay) overlay.remove();
   document.removeEventListener('keydown', obKeyHandler);
@@ -4224,6 +4257,7 @@ function completeOnboarding() {
    =================================================== */
 function init() {
   state = loadState();
+  lastTurn = loadLastTurn(); // restore Coach bubble across reloads
   document.querySelectorAll('[data-view]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.view)));
   document.getElementById('weighin-btn').addEventListener('click', openWeighIn);
   document.getElementById('profile-btn').addEventListener('click', openSettings);
