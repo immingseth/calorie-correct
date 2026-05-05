@@ -1631,6 +1631,7 @@ let currentView = 'diary';
  * lastTurn holds the most-recent user input and coach response, displayed
  * as a single-turn chat bubble above the input on Diary and Results. */
 let lastTurn = null; // { user: string, coach: string, kind: 'log' | 'coach' | 'error' }
+let chatRefocusOnNextRender = false; // set true after a submit/chip click so focus returns to the input
 /* Diary view's currently-shown date. Persists across navigation within a session
  * but resets to today on page reload. Use getSelectedDate() to read it (lazy
  * default to today if not initialized). */
@@ -2017,11 +2018,20 @@ function wireChatStrip() {
     }
 
     inp.value = '';
+    chatRefocusOnNextRender = true;
     navigate(currentView);
   };
 
   sendBtn.addEventListener('click', submit);
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+
+  // After a submit/chip click, the view re-renders and this function runs again.
+  // Restore focus to the new input element so the user can keep typing without re-clicking.
+  if (chatRefocusOnNextRender) {
+    chatRefocusOnNextRender = false;
+    // setTimeout ensures focus happens after the DOM is fully painted
+    setTimeout(() => { inp.focus(); }, 0);
+  }
 
   document.querySelectorAll('.home-chip[data-recent-idx]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2050,6 +2060,7 @@ function wireChatStrip() {
         coach: coachLogResponse(meal, getSelectedDate()),
         kind: 'log',
       };
+      chatRefocusOnNextRender = true;
       navigate(currentView);
     });
   });
