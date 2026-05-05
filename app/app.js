@@ -896,9 +896,6 @@ function getDayEntries(s, date) {
   for (const wat of getWaterForDate(s, date)) {
     entries.push({ kind: 'water', time: wat.time || '12:00', data: wat });
   }
-  if (s.dayNotes && s.dayNotes[date]) {
-    entries.push({ kind: 'note', time: '23:59', data: { date, text: s.dayNotes[date] } });
-  }
   entries.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   return entries;
 }
@@ -2577,13 +2574,15 @@ function renderProgressCard(progress) {
   </div>`;
 }
 
-/* Logging accuracy display — sits below the progress card on Results.
+/* Logging accuracy + calibration card — sits below the progress card on Results.
  * Headline % at the top, then two sliders for the underlying multipliers
  * (calories out — tracker, calories in — food logging). Each slider has
- * anchor labels. The headline updates live as the user drags. Brand-voice
- * copy at the bottom adjusts for estimated vs observed mode. */
+ * anchor labels. The headline updates live as the user drags. The "what the
+ * math sees" block at the bottom shows the calibration numbers (predicted vs
+ * actual loss, real intake/TDEE, daily target). */
 function renderAccuracyCard(s) {
   const acc = getOverallAccuracy(s);
+  const cal = getCalibration(s);
   const trackerPct = Math.round((s.user.trackerAccuracy != null ? s.user.trackerAccuracy : 0.70) * 100);
   const foodPct = Math.round((s.user.foodAccuracy != null ? s.user.foodAccuracy : 0.85) * 100);
   const estimatePct = Math.round((trackerPct * foodPct) / 100);
@@ -2644,6 +2643,36 @@ function renderAccuracyCard(s) {
         </div>
       </div>
     </div>
+
+    ${renderCalibrationMath(s, cal)}
+  </div>`;
+}
+
+/* The "what the math sees" block at the bottom of the accuracy card.
+ * When calibration is ready, shows predicted vs actual loss, real intake/TDEE,
+ * and the current daily target. When not ready (under 7 days of data), shows a
+ * brief building-data message. */
+function renderCalibrationMath(s, cal) {
+  if (!cal.ready) {
+    const initialTarget = getDailyTarget(s);
+    return `<div class="accuracy-math accuracy-math-building">
+      <div class="accuracy-math-eyebrow">What the math sees</div>
+      <div class="accuracy-math-row"><span class="accuracy-math-label">Daily target</span><span class="accuracy-math-value">${initialTarget.toLocaleString()}<span class="accuracy-math-unit">cal</span></span></div>
+      <div class="accuracy-math-note">Once you've logged 7+ days of weight + meals, we'll show predicted vs actual and recalibrate this number weekly.</div>
+    </div>`;
+  }
+  const predicted = Math.max(0, cal.predictedLoss);
+  const actual = Math.max(0, cal.actualLoss);
+  return `<div class="accuracy-math">
+    <div class="accuracy-math-eyebrow">What the math sees</div>
+    <div class="accuracy-math-grid">
+      <div class="accuracy-math-row"><span class="accuracy-math-label">Predicted from logs</span><span class="accuracy-math-value">${predicted.toFixed(1)}<span class="accuracy-math-unit">lb</span></span></div>
+      <div class="accuracy-math-row"><span class="accuracy-math-label">On the scale</span><span class="accuracy-math-value">${actual.toFixed(1)}<span class="accuracy-math-unit">lb</span></span></div>
+      <div class="accuracy-math-row"><span class="accuracy-math-label">Real intake</span><span class="accuracy-math-value">${cal.realIntake.toLocaleString()}<span class="accuracy-math-unit">cal/day</span></span></div>
+      <div class="accuracy-math-row"><span class="accuracy-math-label">Real TDEE</span><span class="accuracy-math-value">${cal.realTDEE.toLocaleString()}<span class="accuracy-math-unit">cal/day</span></span></div>
+      <div class="accuracy-math-row accuracy-math-row-target"><span class="accuracy-math-label">Daily target</span><span class="accuracy-math-value">${cal.dailyTarget.toLocaleString()}<span class="accuracy-math-unit">cal/day</span></span></div>
+    </div>
+    <div class="accuracy-math-note">Calibrated weekly from your weight trend. Move the sliders above and the math doesn't change — your scale is the ground truth either way.</div>
   </div>`;
 }
 
@@ -3161,23 +3190,9 @@ VIEW_RENDERERS.results = function (c) {
       </div>
       <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
     </div>
-
-    ${cal.ready
-      ? `<div class="calibration-card">
-          <div class="calibration-eyebrow">CALIBRATION</div>
-          <div class="calibration-body">${renderCalibrationCopy(cal, currentW, totalLoss)}</div>
-          <div class="calibration-footer">Nothing to fix. We just calibrate every Sunday. <a href="#" id="methodology-link" style="color: var(--primary); font-style: normal; text-decoration: underline; font-weight: 600;">How this is calculated →</a></div>
-        </div>`
-      : `<div class="calibration-card">
-          <div class="calibration-eyebrow">CALIBRATION · BUILDING DATA</div>
-          <div class="calibration-body">We need at least 7 days of weight + meal data to start calibrating. Keep logging.</div>
-        </div>`
-    }
   `;
 
   c.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); navigate(currentView); }));
-  const methLink = document.getElementById('methodology-link');
-  if (methLink) methLink.addEventListener('click', (e) => { e.preventDefault(); navigate('methodology'); });
 
   // Wire the accuracy sliders (live update on drag, persist on release)
   wireAccuracyCard();
@@ -3584,36 +3599,6 @@ VIEW_RENDERERS.coach = function (c) {
 };
 
 /* ===================================================
-   VIEW: METHODOLOGY
-   =================================================== */
-VIEW_RENDERERS.methodology = function (c) {
-  c.innerHTML = `
-    <div class="view-header">
-      <div class="view-eyebrow">METHODOLOGY</div>
-      <div class="view-title">How the math works.</div>
-      <div class="view-sub">Calorie Correct uses your weight trend to back-calculate what your tracking is actually doing. Here's the math, in plain language.</div>
-    </div>
-    <div class="insight-card-lg">
-      <div class="insight-prose">
-        <h3 style="font-family: var(--serif); font-size: 22px; color: var(--primary-dark); margin-bottom: 12px;">The core idea</h3>
-        <p>Energy balance is settled physics. The hard part is getting accurate numbers. Most apps trust your logging blindly. Calorie Correct treats your <strong>actual weight change</strong> as ground truth and uses it to figure out what your real intake and metabolism must be.</p>
-        <div class="insight-divider"></div>
-        <h3 style="font-family: var(--serif); font-size: 22px; color: var(--primary-dark); margin-bottom: 12px;">The calibration loop</h3>
-        <p>For each day: <strong>predicted_deficit</strong> = (BMR × 1.2) + (logged_burn × tracker_accuracy) − logged_intake. Sum daily deficits ÷ 3,500 = predicted weight loss. Compare to actual loss → tracking gap.</p>
-        <div class="insight-divider"></div>
-        <h3 style="font-family: var(--serif); font-size: 22px; color: var(--primary-dark); margin-bottom: 12px;">Real TDEE</h3>
-        <p>Real TDEE = real_intake + (actual_loss × 3,500 ÷ days). Textbook BMR is off by 10-15% for any given person. Real TDEE comes from your actual data.</p>
-        <div class="insight-divider"></div>
-        <h3 style="font-family: var(--serif); font-size: 22px; color: var(--primary-dark); margin-bottom: 12px;">Tracker accuracy multiplier</h3>
-        <p>Trackers overestimate. Apply a haircut: chest-strap HR ~85-95%, Apple Watch ~70-80%, Fitbit ~50-70%, gym machines ~50-70%. After 14 days, we'll suggest a value based on your data.</p>
-        <div class="insight-divider"></div>
-        <h3 style="font-family: var(--serif); font-size: 22px; color: var(--primary-dark); margin-bottom: 12px;">Honest limitations</h3>
-        <p>Combined tracking error — can't separate intake under-counting from burn over-counting. Most users have some of each. Weight has noise — daily fluctuations of 2-4 lbs are normal. Need ~2 weeks of data before math is useful.</p>
-      </div>
-    </div>`;
-};
-
-/* ===================================================
    MODALS
    =================================================== */
 function openMealEdit(mealId) {
@@ -3902,7 +3887,6 @@ function openSettings() {
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Saved meals</div><div class="settings-row-detail">${(state.savedMeals && state.savedMeals.length) ? `${state.savedMeals.length} saved.` : 'None yet. When you parse a meal, click "★ Save as meal" to save it for one-tap re-logging.'}</div>${(state.savedMeals && state.savedMeals.length) ? `<div class="saved-meals-manage">${state.savedMeals.map(m => { const total = m.items.reduce((s,x)=>s+(parseInt(x.calories)||0),0); return `<div class="saved-meal-row"><div class="saved-meal-row-info"><div class="saved-meal-row-name">${escapeAttr(m.name)} <span class="saved-meal-row-cal">${total} cal</span></div><div class="saved-meal-row-detail">${escapeAttr(m.items.map(i => i.name).join(', '))}</div></div><button class="btn btn-secondary btn-sm" data-delete-saved="${m.id}">Delete</button></div>`; }).join('')}</div>` : ''}</div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Export your data</div><div class="settings-row-detail">JSON keeps everything; CSV for spreadsheets.</div><div style="font-size: 12px; color: ${exportColor}; font-weight: 700; margin-top: 8px;">${exportNote}</div><div style="display: flex; gap: 8px; margin-top: 10px;"><button class="btn btn-secondary btn-sm" id="export-json-btn">Export JSON</button><button class="btn btn-secondary btn-sm" id="export-csv-btn">Export CSV</button></div></div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Restore from auto-backup</div><div class="settings-row-detail">${bak ? `Auto-backup last saved ${bak}.` : 'No auto-backup yet.'}</div><button class="btn btn-secondary btn-sm" id="restore-backup-btn" style="margin-top: 10px;" ${!bak ? 'disabled' : ''}>Restore</button></div></div>
-      <div class="settings-row"><div><div class="settings-row-label">Methodology</div><div class="settings-row-detail">How the calibration math works.</div></div><button class="btn btn-secondary btn-sm" id="open-methodology-btn">Read</button></div>
     </div>
     <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Close</button></div>`;
   document.getElementById('modal-backdrop').classList.add('open');
@@ -3915,7 +3899,6 @@ function openSettings() {
   document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
   const restoreBtn = document.getElementById('restore-backup-btn');
   if (restoreBtn) restoreBtn.addEventListener('click', () => { if (!confirm('Restore from auto-backup?')) return; if (restoreFromBackup()) { closeModal(); toast('Restored from backup'); navigate('diary'); } else toast('No backup found'); });
-  document.getElementById('open-methodology-btn').addEventListener('click', () => { closeModal(); navigate('methodology'); });
   const rateSlider = document.getElementById('settings-rate');
   if (rateSlider) {
     rateSlider.addEventListener('input', (e) => { const r = parseInt(e.target.value) / 100; document.getElementById('settings-rate-val').innerHTML = `${r.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span>`; });
