@@ -58,13 +58,16 @@ html, body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   height: 100%;
+  width: 100%;
+  overflow-x: hidden; /* prevent horizontal scroll from any wide element */
+  -webkit-text-size-adjust: 100%; /* don't auto-zoom text on iOS landscape */
 }
 
 /* === Top brand bar (full width, above layout) === */
 .top-bar {
   background: var(--bg-warm);
   border-bottom: 1px solid var(--border);
-  padding: 26px 32px 22px;
+  padding: calc(26px + env(safe-area-inset-top, 0px)) 32px 22px;
   text-align: center;
 }
 .top-bar-brand {
@@ -823,12 +826,17 @@ html, body {
   .today-metric-value { font-size: 15px; }
   .today-metric-label { font-size: 9.5px; }
 }
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .today-metrics { grid-template-columns: repeat(3, 1fr); row-gap: 14px; }
   .today-macro-legend { gap: 12px; font-size: 11.5px; }
+}
+@media (max-width: 480px) {
   .diary-entry-time { min-width: 42px; }
   .diary-entry-cal { min-width: 56px; }
   .diary-nav-today { padding: 4px 10px; font-size: 11px; }
+  .diary-nav-btn { width: 38px; height: 38px; }
+  .diary-nav-label { font-size: 20px; }
+  .diary-nav-date { font-size: 11px; }
 }
 
 /* Calorie ring card */
@@ -1561,20 +1569,27 @@ html, body {
   .home-greeting { font-size: 26px; }
   .briefing-card { padding: 18px 20px; }
   .briefing-lead { font-size: 17px; }
-  .home-input-card { padding: 18px 18px; }
-  .home-input { height: 44px; font-size: 14.5px; }
-  .home-input-send { height: 44px; padding: 0 18px; }
+  .home-input-card { padding: 16px 14px; }
+  .home-input-wrap { gap: 6px; }
+  .home-input { height: 44px; font-size: 14.5px; padding: 0 12px; min-width: 0; }
+  .home-input-send { height: 44px; padding: 0 14px; font-size: 13px; }
   .home-add-row { gap: 6px; }
   .chat-turn-user,
   .chat-turn-coach { max-width: 100%; padding: 9px 12px; }
   .chat-turn-text { font-size: 14px; }
-  .chat-strip-big .chat-input-card { padding: 18px 18px; }
-  .chat-strip-big .home-input { height: 48px; font-size: 15px; }
-  .chat-strip-big .home-input-send { height: 48px; padding: 0 18px; font-size: 14px; }
-  .chat-strip-big .ai-input-btn { height: 48px; width: 38px; }
+  .chat-strip-big .chat-input-card { padding: 16px 14px; }
+  .chat-strip-big .home-input { height: 48px; font-size: 15px; padding: 0 14px; }
+  .chat-strip-big .home-input-send { height: 48px; padding: 0 16px; font-size: 14px; }
+  .chat-strip-big .ai-input-btn { height: 48px; width: 36px; }
   .chat-hint { font-size: 12px; }
   .chat-turn-coach.chat-turn-greeting { padding: 12px 14px; }
   .chat-turn-coach.chat-turn-greeting .chat-turn-text { font-size: 15px; }
+}
+@media (max-width: 380px) {
+  /* Very narrow phones — give input as much room as possible */
+  .ai-input-btn { display: none; } /* hide placeholder mic/camera buttons */
+  .chat-strip-big .chat-input-card { padding: 14px 12px; }
+  .home-input-wrap { gap: 8px; }
 }
 
 /* ============================================
@@ -2937,6 +2952,10 @@ html, body {
   .accuracy-pct { font-size: 18px; }
   .accuracy-slider-anchors { font-size: 10.5px; }
   .accuracy-math-value { font-size: 15px; }
+  .accuracy-slider { height: 8px; } /* fatter track on mobile for easier touch */
+  .accuracy-slider::-webkit-slider-thumb { width: 24px; height: 24px; }
+  .accuracy-slider::-moz-range-thumb { width: 24px; height: 24px; }
+  .accuracy-sliders { gap: 26px; } /* extra room between sliders for accidental-tap safety */
 }
 .progress-header {
   display: flex;
@@ -3670,7 +3689,7 @@ input[type="range"]::-moz-range-thumb {
   }
   .weighin-icon { width: 18px; height: 18px; font-size: 14px; }
 
-  .main { padding: 24px 20px 100px; max-width: 100%; }
+  .main { padding: 24px 20px calc(100px + env(safe-area-inset-bottom, 0px)); max-width: 100%; }
 
   .mobile-tabs {
     display: flex;
@@ -3679,7 +3698,9 @@ input[type="range"]::-moz-range-thumb {
     background: var(--card);
     border-top: 1px solid var(--border);
     z-index: 50;
-    padding: 8px 4px 12px;
+    padding: 8px 4px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(4px + env(safe-area-inset-left, 0px));
+    padding-right: calc(4px + env(safe-area-inset-right, 0px));
     box-shadow: 0 -4px 12px rgba(60, 50, 40, 0.04);
   }
   .m-tab {
