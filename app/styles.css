@@ -1384,6 +1384,65 @@ html, body {
   font-weight: 700;
 }
 
+/* Greeting-only Coach turn (proactive daily greeting, no user message above).
+   Slightly more presence than a regular response. */
+.chat-turn-coach.chat-turn-greeting {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, var(--primary-softer, #F2F6F3) 0%, var(--card) 100%);
+  border-color: var(--primary-light, #9DBA82);
+  border-left: 3px solid var(--primary, #769B6C);
+}
+.chat-turn-coach.chat-turn-greeting .chat-turn-text {
+  font-size: 15.5px;
+  line-height: 1.55;
+}
+
+/* Big chat strip — used on Diary as the dominant element. */
+.chat-strip-big .chat-input-card {
+  padding: 26px 28px;
+  border-color: var(--primary-light, #9DBA82);
+  box-shadow: 0 4px 14px rgba(74, 99, 84, 0.08);
+}
+.chat-strip-big .home-input {
+  height: 56px;
+  font-size: 16px;
+  padding: 0 18px;
+}
+.chat-strip-big .home-input-send {
+  height: 56px;
+  padding: 0 26px;
+  font-size: 15px;
+}
+.chat-strip-big .ai-input-btn {
+  height: 56px;
+  width: 44px;
+}
+
+/* Subtle italic example hint under chat input */
+.chat-hint {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* Quieter diary card under the chat (Coach-first Diary) */
+.diary-card-quiet {
+  box-shadow: none;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+}
+.diary-card-quiet .diary-header { opacity: 0.85; }
+
+/* Compact date nav variant (used between chat and diary card) */
+.diary-nav-compact {
+  margin: 0 auto 16px;
+  padding: 6px 10px;
+}
+
 /* Inline diary card on Home (was a separate card on the old Diary view) */
 .home-diary-card {
   max-width: 760px;
@@ -1407,6 +1466,13 @@ html, body {
   .chat-turn-user,
   .chat-turn-coach { max-width: 100%; padding: 9px 12px; }
   .chat-turn-text { font-size: 14px; }
+  .chat-strip-big .chat-input-card { padding: 18px 18px; }
+  .chat-strip-big .home-input { height: 48px; font-size: 15px; }
+  .chat-strip-big .home-input-send { height: 48px; padding: 0 18px; font-size: 14px; }
+  .chat-strip-big .ai-input-btn { height: 48px; width: 38px; }
+  .chat-hint { font-size: 12px; }
+  .chat-turn-coach.chat-turn-greeting { padding: 12px 14px; }
+  .chat-turn-coach.chat-turn-greeting .chat-turn-text { font-size: 15px; }
 }
 
 /* ============================================

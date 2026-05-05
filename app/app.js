@@ -496,6 +496,7 @@ function makeBlankState() {
       activityLevel: 'light',
       trackerAccuracy: 1.0,
       targetLossRate: 1.0,
+      lastGreetingDate: null,
     },
     weights: [], meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [],
     onboarded: false,
@@ -520,6 +521,7 @@ function migrateState(s) {
   if (!s.user.activityLevel) s.user.activityLevel = 'light';
   if (s.user.trackerAccuracy == null) s.user.trackerAccuracy = 1.0;
   if (s.user.targetLossRate == null) s.user.targetLossRate = 1.0; // lb/week
+  if (s.user.lastGreetingDate === undefined) s.user.lastGreetingDate = null;
   if (!s.dayNotes) s.dayNotes = {}; // map of dateISO → note text
   if (!Array.isArray(s.savedMeals)) s.savedMeals = []; // user-defined meal templates
   if (!Array.isArray(s.water)) s.water = []; // water log: array of { id, date, time, oz }
@@ -554,6 +556,7 @@ function resetToBlank(profile) {
       activityLevel: 'light',
       trackerAccuracy: 1.0,
       targetLossRate: 1.0,
+      lastGreetingDate: null,
     },
     weights: [{ date: todayISO(), weight: profile.startWeight }],
     meals: [],
@@ -680,6 +683,7 @@ function generateDemoData() {
       activityLevel: 'light',
       trackerAccuracy: 1.0,
       targetLossRate: 1.0,
+      lastGreetingDate: null,
     },
     weights,
     meals: trimmedMeals,
@@ -1861,6 +1865,47 @@ function coachLogResponse(meal, dayDate) {
   return `${opener} ${status}`;
 }
 
+/* Build a proactive Coach greeting using the daily briefing data.
+ * Returns a single HTML string (used as lastTurn.coach text). */
+function coachDailyGreeting(s) {
+  const b = generateDailyBriefing(s);
+  const target = getDailyTarget(s);
+  const consumed = getDailyCalories(s, todayISO());
+  const remaining = target - consumed;
+  let openLine;
+  if (consumed < 50) {
+    openLine = `${b.greeting} ${b.lead}`;
+  } else if (remaining > 200) {
+    openLine = `${b.greeting} You've got <strong>${remaining.toLocaleString()} cal</strong> left to play with today.`;
+  } else if (remaining > 0) {
+    openLine = `${b.greeting} <strong>${remaining.toLocaleString()} cal</strong> left for the day.`;
+  } else {
+    openLine = `${b.greeting} You're at target for today already.`;
+  }
+  const parts = [openLine];
+  if (b.body) parts.push(b.body);
+  if (b.extra) parts.push(b.extra);
+  parts.push(b.suggestion);
+  return parts.join(' ');
+}
+
+/* Set lastTurn to a Coach greeting once per calendar day.
+ * Persists state.user.lastGreetingDate so the greeting only fires once per day,
+ * even across page reloads. Skips if a turn is already in flight. */
+function seedDailyGreetingIfNeeded() {
+  const today = todayISO();
+  if (state.user.lastGreetingDate === today) return;
+  if (lastTurn) return; // user already started a conversation
+  lastTurn = {
+    user: '',
+    coach: coachDailyGreeting(state),
+    kind: 'coach',
+    greeting: true,
+  };
+  state.user.lastGreetingDate = today;
+  saveState();
+}
+
 /* Generate a Coach response for input that didn't parse as a meal.
  * For now, polite placeholder + the canned coach response if the question
  * matches a known topic. Real Claude wires up later. */
@@ -1880,16 +1925,20 @@ function coachQuestionResponse(text) {
  * Used at the top of Diary and Results. */
 function renderChatStrip(opts) {
   const placeholder = opts && opts.placeholder ? opts.placeholder : "What's on your mind?";
+  const showHint = !(opts && opts.showHint === false);
+  const big = !!(opts && opts.big);
   const recent = (opts && opts.showChips !== false) ? getRecentFoods(state, 5) : [];
+  const hintText = "Try: \"turkey sandwich and an apple\", \"how am I doing this week?\", or \"why did I gain 2 lbs?\"";
   return `
-    <div class="chat-strip">
+    <div class="chat-strip${big ? ' chat-strip-big' : ''}">
       ${lastTurn ? `
         <div class="chat-turn">
+          ${lastTurn.greeting || !lastTurn.user ? '' : `
           <div class="chat-turn-user">
             <span class="chat-turn-label">You</span>
             <span class="chat-turn-text">${escapeAttr(lastTurn.user)}</span>
-          </div>
-          <div class="chat-turn-coach chat-turn-${lastTurn.kind}">
+          </div>`}
+          <div class="chat-turn-coach chat-turn-${lastTurn.kind}${lastTurn.greeting ? ' chat-turn-greeting' : ''}">
             <span class="chat-turn-label">Coach</span>
             <span class="chat-turn-text">${lastTurn.coach}</span>
           </div>
@@ -1907,6 +1956,8 @@ function renderChatStrip(opts) {
           </button>
           <button class="btn btn-primary home-input-send" id="chat-send">Send</button>
         </div>
+
+        ${showHint ? `<div class="chat-hint">${hintText}</div>` : ''}
 
         ${recent.length > 0 ? `<div class="home-chips">
           <span class="home-chips-label">Quick:</span>
@@ -2009,10 +2060,8 @@ VIEW_RENDERERS.diary = function (c) {
   const date = getSelectedDate();
   const today = todayISO();
   const isToday = date === today;
-  const briefing = isToday ? generateDailyBriefing(state) : null;
   const target = getDailyTarget(state);
   const consumed = getDailyCalories(state, date);
-  const remaining = target - consumed;
   const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
   const burnRaw = getDailyExerciseBurn(state, date);
   const burnAdj = Math.round(burnRaw * trackerAcc);
@@ -2020,13 +2069,17 @@ VIEW_RENDERERS.diary = function (c) {
   const macros = getDailyMacros(state, date);
   const water = getDailyWater(state, date);
   const dayEntries = getDayEntries(state, date);
-  const currentW = getCurrentWeight(state);
-  const totalLoss = state.user.startWeight - currentW;
+
+  // Coach-first: seed proactive greeting once per day (only for "today" view).
+  if (isToday) seedDailyGreetingIfNeeded();
 
   c.innerHTML = `
-    ${renderChatStrip({ placeholder: isToday ? "What's on your mind?" : `Log to ${getSelectedDateLabel().toLowerCase()}…` })}
+    ${renderChatStrip({
+      placeholder: isToday ? "Tell Coach what you ate, or ask anything…" : `Log to ${getSelectedDateLabel().toLowerCase()}…`,
+      big: true,
+    })}
 
-    <div class="diary-nav">
+    <div class="diary-nav diary-nav-compact">
       <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
       <div class="diary-nav-center">
         <div class="diary-nav-label">${getSelectedDateLabel()}</div>
@@ -2040,18 +2093,7 @@ VIEW_RENDERERS.diary = function (c) {
       ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
     </div>
 
-    ${isToday ? `<div class="home-greeting">${briefing.greeting}</div>
-    <div class="home-stats-line">${currentW.toFixed(1)} lb · ${totalLoss >= 0 ? '↓' : '↑'} ${Math.abs(totalLoss).toFixed(1)} lb total · ${remaining > 0 ? remaining.toLocaleString() + ' cal left today' : 'over target by ' + Math.abs(remaining)}</div>
-
-    <div class="briefing-card">
-      <div class="briefing-eyebrow">TODAY'S BRIEFING</div>
-      <div class="briefing-lead">${briefing.lead}</div>
-      ${briefing.body ? `<div class="briefing-body">${briefing.body}</div>` : ''}
-      ${briefing.extra ? `<div class="briefing-extra">${briefing.extra}</div>` : ''}
-      <div class="briefing-suggestion">${briefing.suggestion}</div>
-    </div>` : ''}
-
-    <div class="card home-diary-card">
+    <div class="card home-diary-card diary-card-quiet">
       <div class="diary-header">
         <div class="section-h" style="margin: 0;">${isToday ? "Today's diary" : `Diary · ${getSelectedDateLabel().toLowerCase()}`}</div>
         <div class="diary-count">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
@@ -2879,7 +2921,7 @@ VIEW_RENDERERS.results = function (c) {
   const progress = getGoalProgress(state);
 
   c.innerHTML = `
-    ${renderChatStrip({ placeholder: "Ask about your progress, log a meal, or just chat", showChips: false })}
+    ${renderChatStrip({ placeholder: "Ask about your progress, log a meal, or just chat", showChips: false, showHint: false })}
 
     <div class="view-header">
       <div class="view-eyebrow">RESULTS</div>
