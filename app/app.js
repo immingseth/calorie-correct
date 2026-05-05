@@ -1621,7 +1621,7 @@ const ICON = {
 /* ===================================================
    ROUTER & UNDO
    =================================================== */
-let currentView = 'today';
+let currentView = 'home';
 /* Diary view's currently-shown date. Persists across navigation within a session
  * but resets to today on page reload. Use getSelectedDate() to read it (lazy
  * default to today if not initialized). */
@@ -1716,6 +1716,233 @@ function toast(msg, opts) {
 function closeModal() {
   document.getElementById('modal-backdrop').classList.remove('open');
 }
+
+/* ===================================================
+   VIEW: HOME — Phase 3 design (locally-generated briefing
+   + unified input + Today snapshot in right sidebar)
+   The unified input wires to the existing parser for now;
+   Phase 2 swaps in the Claude backend.
+   =================================================== */
+
+/* Generate a brand-voiced morning briefing from local data.
+ * No Claude required — uses calibration, recent trend, and
+ * yesterday's logging as data inputs. Honest, encouraging, brief. */
+function generateDailyBriefing(s) {
+  const today = todayISO();
+  const yISO = getDayBeforeISO(today);
+  const yMeals = s.meals.filter(m => m.date === yISO);
+  const yIntake = yMeals.reduce((sum, m) => sum + m.totalCal, 0);
+  const yBurnRaw = (s.exercises || []).filter(e => e.date === yISO).reduce((sum, e) => sum + (e.caloriesBurned || 0), 0);
+  const trackerAcc = s.user.trackerAccuracy != null ? s.user.trackerAccuracy : 1.0;
+  const yBurn = Math.round(yBurnRaw * trackerAcc);
+  const yNet = yIntake - yBurn;
+  const target = getDailyTarget(s);
+  const rate7 = get7dRate(s);
+  const cal = getCalibration(s);
+  const currentW = getCurrentWeight(s);
+  const startW = s.user.startWeight;
+  const totalLoss = startW - currentW;
+  const consistency = getConsistencyMetric(s);
+
+  // Headline: time-of-day greeting + light status reading
+  const h = new Date().getHours();
+  let timeGreeting;
+  if (h < 12) timeGreeting = 'Good morning';
+  else if (h < 18) timeGreeting = 'Good afternoon';
+  else timeGreeting = 'Good evening';
+
+  let body = '';
+  let lead = '';
+
+  // Lead with the most useful data point
+  if (rate7 != null && rate7 >= 0.5 && rate7 <= 2.0) {
+    lead = `You're trending down ${rate7.toFixed(2)} lb/wk. Healthy pace.`;
+  } else if (rate7 != null && rate7 < 0.5 && rate7 > -0.3) {
+    lead = `Your trend is flat right now. Normal — most weight loss happens in stair-step patterns.`;
+  } else if (rate7 != null && rate7 < 0) {
+    lead = `Your 7-day trend is up ${Math.abs(rate7).toFixed(2)} lb. Could be water, sodium, hormones — give it a few more days before reading anything into it.`;
+  } else if (rate7 != null && rate7 > 2.0) {
+    lead = `You're losing fast right now (${rate7.toFixed(2)} lb/wk). That's sustainable for a couple weeks but watch for fatigue.`;
+  } else if (s.weights && s.weights.length < 4) {
+    lead = `Welcome back. Once you've logged 4+ weights we'll have a real trend to read.`;
+  } else {
+    lead = `Welcome back.`;
+  }
+
+  // Body: yesterday's data
+  if (yIntake > 100) {
+    const vsTarget = yNet - target;
+    if (Math.abs(vsTarget) < 100) {
+      body = `Yesterday landed at ${yNet.toLocaleString()} cal — basically on target.`;
+    } else if (vsTarget < 0) {
+      body = `Yesterday came in ${Math.abs(vsTarget).toLocaleString()} cal under target. The math liked that.`;
+    } else if (vsTarget < 400) {
+      body = `Yesterday was ${vsTarget.toLocaleString()} cal over target. Not a problem — your weekly average is what moves the scale.`;
+    } else {
+      body = `Yesterday ran ${vsTarget.toLocaleString()} cal over target. One day doesn't change the trend; what you do this week does.`;
+    }
+  } else if (yMeals.length === 0) {
+    body = `Yesterday wasn't logged. No judgment — pick it back up today.`;
+  }
+
+  // Optional: consistency callout
+  let extra = '';
+  if (consistency && consistency.pct >= 80) {
+    extra = `You've logged ${consistency.logged} of the last ${consistency.total} days — that consistency is doing the work.`;
+  } else if (consistency && consistency.pct >= 50 && consistency.pct < 80) {
+    extra = `${consistency.logged} of the last ${consistency.total} days logged. Steady is what calibration runs on.`;
+  }
+
+  // Suggestion: one practical thing
+  let suggestion = '';
+  if (cal.ready && cal.calibrationFactor > 1.15) {
+    suggestion = `Your logs predict more loss than your scale shows. The math has adjusted your target — no action needed unless you want tighter tracking.`;
+  } else if (totalLoss > 0 && rate7 != null && rate7 > 0.3) {
+    suggestion = `Keep doing what you're doing.`;
+  } else if (rate7 != null && rate7 < 0) {
+    suggestion = `If your trend stays up for another week, we'll look at adjusting your daily target.`;
+  } else {
+    suggestion = `Log what you eat, weigh in tomorrow morning, and we'll keep watching the trend.`;
+  }
+
+  return {
+    greeting: `${timeGreeting}, ${s.user.name}.`,
+    lead,
+    body,
+    extra,
+    suggestion,
+  };
+}
+
+VIEW_RENDERERS.home = function (c) {
+  // Home is always TODAY. Past days are accessible via clicking entries on Progress.
+  const today = todayISO();
+  setSelectedDate(today); // ensure all logging actions write to today
+  const briefing = generateDailyBriefing(state);
+  const target = getDailyTarget(state);
+  const consumed = getDailyCalories(state, today);
+  const remaining = target - consumed;
+  const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
+  const burnRaw = getDailyExerciseBurn(state, today);
+  const burnAdj = Math.round(burnRaw * trackerAcc);
+  const netToday = consumed - burnAdj;
+  const macros = getDailyMacros(state, today);
+  const water = getDailyWater(state, today);
+  const todayEntries = getDayEntries(state, today);
+  const currentW = getCurrentWeight(state);
+  const totalLoss = state.user.startWeight - currentW;
+  const recent = getRecentFoods(state, 5);
+
+  c.innerHTML = `
+    <div class="home-greeting">${briefing.greeting}</div>
+    <div class="home-stats-line">${currentW.toFixed(1)} lb · ${totalLoss >= 0 ? '↓' : '↑'} ${Math.abs(totalLoss).toFixed(1)} lb total · ${remaining > 0 ? remaining.toLocaleString() + ' cal left today' : 'over target by ' + Math.abs(remaining)}</div>
+
+    <div class="briefing-card">
+      <div class="briefing-eyebrow">TODAY'S BRIEFING</div>
+      <div class="briefing-lead">${briefing.lead}</div>
+      ${briefing.body ? `<div class="briefing-body">${briefing.body}</div>` : ''}
+      ${briefing.extra ? `<div class="briefing-extra">${briefing.extra}</div>` : ''}
+      <div class="briefing-suggestion">${briefing.suggestion}</div>
+    </div>
+
+    <div class="home-input-card">
+      <div class="home-input-wrap">
+        <input class="home-input" id="home-input" placeholder="What's on your mind?" autocomplete="off" />
+        <button class="ai-input-btn" disabled title="Voice — coming soon with Claude AI" aria-label="Voice (coming soon)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+        <button class="ai-input-btn" disabled title="Photo — coming soon with Claude AI" aria-label="Photo (coming soon)">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        </button>
+        <button class="btn btn-primary home-input-send" id="home-input-send">Send</button>
+      </div>
+
+      ${recent.length > 0 ? `<div class="home-chips">
+        <span class="home-chips-label">Quick:</span>
+        ${recent.map((f, i) => `<button class="recent-chip home-chip" data-recent-idx="${i}">
+          <span class="recent-chip-name">${escapeAttr(f.name)}</span>
+          <span class="recent-chip-cal">${f.lastCal}</span>
+        </button>`).join('')}
+      </div>` : ''}
+
+      <div class="water-quick-add" style="margin-top: 14px;">
+        <span class="water-quick-label">Water:</span>
+        <button class="water-chip" data-water-add="8">8 oz</button>
+        <button class="water-chip" data-water-add="12">12 oz</button>
+        <button class="water-chip" data-water-add="16">16 oz</button>
+        <button class="water-chip" data-water-add="32">32 oz</button>
+      </div>
+
+      <div class="home-add-row">
+        <button class="btn btn-secondary btn-sm" id="home-add-exercise">+ Log activity</button>
+        <button class="btn btn-secondary btn-sm" id="home-add-water">+ Custom water</button>
+      </div>
+    </div>
+
+    <div class="card home-diary-card">
+      <div class="diary-header">
+        <div class="section-h" style="margin: 0;">Today's diary</div>
+        <div class="diary-count">${todayEntries.length} ${todayEntries.length === 1 ? 'entry' : 'entries'}</div>
+      </div>
+      <div class="diary-stream">
+        ${todayEntries.length ? todayEntries.map(renderDiaryEntry).join('') : '<div class="diary-empty">Nothing logged yet today.</div>'}
+      </div>
+      ${renderDailyTotalsBlock(consumed, burnAdj, netToday, target, macros, water)}
+    </div>
+  `;
+
+  // Wire input — uses the existing parser as the backend for now.
+  // Parsed meal saves directly. User can correct via the inline diary entry click.
+  const homeInput = document.getElementById('home-input');
+  const sendBtn = document.getElementById('home-input-send');
+  const handleHomeSubmit = () => {
+    const text = homeInput.value.trim();
+    if (!text) return;
+    const items = parseMealText(text);
+    if (!items.length) return;
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+    const meal = {
+      id: Date.now(),
+      date: today,
+      time,
+      mealType: guessMealType(now.getHours()),
+      raw: text,
+      items,
+      totalCal,
+      source: 'ai',
+    };
+    state.meals.push(meal);
+    recordAction({ type: 'create-meal', meal });
+    saveState();
+    homeInput.value = '';
+    toast(`Logged ${totalCal} cal · click to edit`, { undo: true });
+    navigate('home');
+  };
+  if (sendBtn) sendBtn.addEventListener('click', handleHomeSubmit);
+  if (homeInput) homeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleHomeSubmit(); });
+
+  // Wire quick chips (recent foods + water)
+  c.querySelectorAll('.home-chip[data-recent-idx]').forEach(btn => {
+    btn.addEventListener('click', () => logRecentFood(parseInt(btn.dataset.recentIdx)));
+  });
+  c.querySelectorAll('[data-water-add]').forEach(btn => {
+    btn.addEventListener('click', () => addWaterEntry(parseInt(btn.dataset.waterAdd)));
+  });
+
+  // Add buttons
+  const addEx = document.getElementById('home-add-exercise');
+  if (addEx) addEx.addEventListener('click', () => openExerciseAdd());
+  const addWat = document.getElementById('home-add-water');
+  if (addWat) addWat.addEventListener('click', () => openWaterAdd());
+
+  // Diary entry edit handlers
+  c.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
+  c.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
+  c.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
+  c.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
+};
 
 /* ===================================================
    VIEW: TODAY
@@ -2111,7 +2338,7 @@ function logRecentFood(idx) {
   recordAction({ type: 'create-meal', meal });
   saveState();
   toast(`Logged ${food.name} (${food.lastCal} cal)`, { undo: true });
-  navigate('today');
+  navigate('home');
 }
 
 function wireRecentFoodsStrip() {
@@ -2184,7 +2411,7 @@ function copyYesterdayToToday() {
   state.exercises = (state.exercises || []).concat(newExercises);
   saveState();
   toast(`Copied ${newMeals.length} meals and ${newExercises.length} workouts from the day before.`);
-  navigate('today');
+  navigate('home');
 }
 
 function wireCopyYesterdayBtn() {
@@ -2230,7 +2457,7 @@ function logSavedMeal(savedId) {
   recordAction({ type: 'create-meal', meal });
   saveState();
   toast(`Logged ${saved.name} (${totalCal} cal)`, { undo: true });
-  navigate('today');
+  navigate('home');
 }
 
 function wireSavedMealsStrip() {
@@ -2279,7 +2506,7 @@ function logFoodFromSearch(name, cal) {
   recordAction({ type: 'create-meal', meal });
   saveState();
   toast(`Logged ${name} (${cal} cal)`, { undo: true });
-  navigate('today');
+  navigate('home');
 }
 
 function renderTodayLogger() {
@@ -2471,7 +2698,7 @@ function wireTodayLogger() {
       recordAction({ type: 'create-meal', meal });
       saveState();
       toast(`Logged ${cal} cal`, { undo: true });
-      navigate('today');
+      navigate('home');
     };
     document.getElementById('today-numeric-save').addEventListener('click', handleSave);
     document.getElementById('today-numeric-cal').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSave(); });
@@ -2489,11 +2716,117 @@ function saveTodayParse() {
   saveState();
   todayParseDraft = null;
   toast(`Logged ${totalCal} cal to ${meal.mealType}`, { undo: true });
-  navigate('today');
+  navigate('home');
 }
 
 /* ===================================================
-   VIEW: TREND
+   VIEW: PROGRESS — simplified combined trend + calibration
+   Five sections: weight headline, chart, goal progress,
+   calibration insight, weight log.
+   Deliberately leaves out: bar charts, weekday patterns,
+   compare periods, adherence cards, insight archive.
+   The brand premise is *honest calibration*, not stat density.
+   =================================================== */
+let progressRange = 90;
+
+VIEW_RENDERERS.progress = function (c) {
+  const cal = getCalibration(state);
+  const startW = state.user.startWeight;
+  const currentW = getCurrentWeight(state);
+  const totalLoss = startW - currentW;
+  const days = state.weights.length > 1 ? daysBetween(state.weights[0].date, state.weights[state.weights.length - 1].date) : 0;
+  const progress = getGoalProgress(state);
+
+  c.innerHTML = `
+    <div class="view-header">
+      <div class="view-eyebrow">PROGRESS</div>
+      <div class="trend-headline">
+        <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
+        <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
+      </div>
+    </div>
+
+    ${renderProgressCard(progress)}
+
+    <div class="chart-card">
+      <div class="date-range-row">
+        <div class="bar-chart-legend">
+          <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
+          <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
+          <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
+        </div>
+        <div class="date-range-tabs" id="progress-range-tabs">
+          <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
+          <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
+          <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
+          <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
+    </div>
+
+    ${cal.ready
+      ? `<div class="calibration-card">
+          <div class="calibration-eyebrow">CALIBRATION</div>
+          <div class="calibration-body">${renderCalibrationCopy(cal, currentW, totalLoss)}</div>
+          <div class="calibration-footer">Nothing to fix. We just calibrate every Sunday. <a href="#" id="methodology-link" style="color: var(--primary); font-style: normal; text-decoration: underline; font-weight: 600;">How this is calculated →</a></div>
+        </div>`
+      : `<div class="calibration-card">
+          <div class="calibration-eyebrow">CALIBRATION · BUILDING DATA</div>
+          <div class="calibration-body">We need at least 7 days of weight + meal data to start calibrating. Keep logging.</div>
+        </div>`
+    }
+
+    ${renderWeightLogCard(state)}
+  `;
+
+  c.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); navigate(currentView); }));
+  c.querySelectorAll('[data-weight-date]').forEach(row => row.addEventListener('click', () => openDayDetail(row.dataset.weightDate)));
+  const methLink = document.getElementById('methodology-link');
+  if (methLink) methLink.addEventListener('click', (e) => { e.preventDefault(); navigate('methodology'); });
+  const toggleBtn = document.getElementById('weight-log-toggle');
+  if (toggleBtn) toggleBtn.addEventListener('click', () => { weightLogShowAll = !weightLogShowAll; navigate(currentView); });
+
+  setTimeout(() => {
+    renderProgressChart(state, cal, progressRange);
+  }, 10);
+};
+
+/* Simplified trend chart — daily dots, 7-day average, goal line. No
+ * "predicted from logging" overlay (was visually busy, low signal). */
+function renderProgressChart(s, cal, range) {
+  const canvas = document.getElementById('progress-chart');
+  if (!canvas) return;
+  if (trendChart) trendChart.destroy();
+  const allWeights = s.weights;
+  const visibleWeights = range > 0 ? allWeights.slice(-range) : allWeights;
+  if (visibleWeights.length === 0) return;
+  const labels = visibleWeights.map(w => formatShortDate(w.date));
+  const rawData = visibleWeights.map(w => w.weight);
+  const smoothedFull = smoothSeries(allWeights.map(w => w.weight), 7);
+  const startIdx = allWeights.length - visibleWeights.length;
+  const smoothedData = smoothedFull.slice(startIdx);
+  const goalW = s.user.goalWeight;
+  const goalData = visibleWeights.map(() => goalW);
+  const yValues = [...rawData, ...smoothedData.filter(v => v != null)];
+  const yMin = Math.min(...yValues, goalW) - 2;
+  const yMax = Math.max(...yValues, goalW) + 2;
+  trendChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Daily', data: rawData, borderColor: 'rgba(118, 155, 108, 0.30)', pointBackgroundColor: '#769B6C', pointRadius: 2.5, borderWidth: 1.2, fill: false, order: 3 },
+      { label: '7-day avg', data: smoothedData, borderColor: '#446957', backgroundColor: 'rgba(68, 105, 87, 0.05)', borderWidth: 3, tension: 0.3, pointRadius: 0, fill: true, order: 1 },
+      { label: 'Goal', data: goalData, borderColor: 'rgba(138, 130, 120, 0.6)', borderWidth: 1.5, borderDash: [2, 4], pointRadius: 0, fill: false, order: 4 },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#2C2826', padding: 12, cornerRadius: 8, callbacks: { title: (items) => { if (!items.length) return ''; const w = visibleWeights[items[0].dataIndex]; return new Date(w.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); }, label: (ctx) => ctx.parsed.y == null ? null : `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} lb` } } },
+      scales: { x: { grid: { display: false }, ticks: { color: '#8A8278', font: { size: 10 }, maxTicksLimit: 10 }, border: { display: false } }, y: { min: yMin, max: yMax, grid: { color: '#F4EEE3' }, ticks: { color: '#8A8278', font: { size: 10, family: 'Iowan Old Style, Georgia, serif' } }, border: { display: false }, title: { display: true, text: 'lb', color: '#8A8278', font: { size: 11 } } } }
+    },
+  });
+}
+
+/* ===================================================
+   VIEW: TREND  (legacy, not navigated to — kept until cleanup)
    =================================================== */
 let trendChart = null, caloriesBarChart = null, exerciseBarChart = null;
 let trendRange = 90, weightLogShowAll = false;
@@ -3066,7 +3399,7 @@ function openExerciseAdd() {
       const exercise = { id: Date.now(), date: getSelectedDate(), time, type: selectedTypeId, typeName: t2.name, typeEmoji: t2.emoji, duration: dur, caloriesBurned: cal, note, source: 'manual' };
       state.exercises.push(exercise);
       recordAction({ type: 'create-exercise', exercise });
-      saveState(); closeModal(); toast(`Logged ${t2.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('today');
+      saveState(); closeModal(); toast(`Logged ${t2.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('home');
     });
   };
 
@@ -3180,7 +3513,7 @@ function openSettings() {
     <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Close</button></div>`;
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
-  document.getElementById('reset-demo-btn').addEventListener('click', () => { if (!confirm('Reset to demo data?')) return; resetToDemoData(); closeModal(); toast('Demo data restored'); navigate('today'); });
+  document.getElementById('reset-demo-btn').addEventListener('click', () => { if (!confirm('Reset to demo data?')) return; resetToDemoData(); closeModal(); toast('Demo data restored'); navigate('home'); });
   document.getElementById('start-fresh-btn').addEventListener('click', () => { if (!confirm('Clear all data and start fresh?')) return; closeModal(); startOnboarding(); });
   document.getElementById('import-seth-btn').addEventListener('click', () => { if (!confirm("Replace data with Seth's spreadsheet?")) return; importSethSpreadsheet(); });
   document.getElementById('settings-activity').addEventListener('change', (e) => { state.user.activityLevel = e.target.value; saveState(); toast(`Activity level updated`); });
@@ -3194,7 +3527,7 @@ function openSettings() {
   document.getElementById('export-json-btn').addEventListener('click', () => exportData('json'));
   document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
   const restoreBtn = document.getElementById('restore-backup-btn');
-  if (restoreBtn) restoreBtn.addEventListener('click', () => { if (!confirm('Restore from auto-backup?')) return; if (restoreFromBackup()) { closeModal(); toast('Restored from backup'); navigate('today'); } else toast('No backup found'); });
+  if (restoreBtn) restoreBtn.addEventListener('click', () => { if (!confirm('Restore from auto-backup?')) return; if (restoreFromBackup()) { closeModal(); toast('Restored from backup'); navigate('home'); } else toast('No backup found'); });
   document.getElementById('open-methodology-btn').addEventListener('click', () => { closeModal(); navigate('methodology'); });
   const rateSlider = document.getElementById('settings-rate');
   if (rateSlider) {
@@ -3521,7 +3854,7 @@ function completeOnboarding() {
   document.getElementById('user-name').textContent = state.user.name;
   document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
   toast('Welcome to Calorie Correct.');
-  navigate('today');
+  navigate('home');
 }
 
 /* ===================================================
@@ -3539,14 +3872,14 @@ function init() {
     state = makeBlankState();
     document.getElementById('user-name').textContent = state.user.name;
     document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
-    navigate('today');
+    navigate('home');
     startOnboarding();
     return;
   }
 
   document.getElementById('user-name').textContent = state.user.name;
   document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
-  navigate('today');
+  navigate('home');
 
   const params = new URLSearchParams(window.location.search);
   if (params.get('onboard') === '1') {

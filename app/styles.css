@@ -1171,6 +1171,174 @@ html, body {
 }
 
 /* ============================================
+   HOME VIEW — Phase 3 design (briefing + unified
+   input + Today snapshot)
+   ============================================ */
+
+/* Home is single-column now — input, briefing, and full diary
+ * all flow vertically. No side panels (one location per function). */
+.home-main {
+  max-width: 760px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.home-greeting {
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--primary-dark);
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
+.home-stats-line {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  margin-bottom: 24px;
+}
+
+.briefing-card {
+  background: var(--card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  padding: 22px 26px;
+  margin-bottom: 22px;
+  box-shadow: var(--shadow-sm);
+}
+.briefing-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+.briefing-lead {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--primary-dark);
+  letter-spacing: -0.2px;
+  line-height: 1.3;
+  margin-bottom: 8px;
+}
+.briefing-body, .briefing-extra {
+  font-size: 14px;
+  color: var(--text-soft);
+  line-height: 1.55;
+  margin-bottom: 6px;
+}
+.briefing-suggestion {
+  font-size: 13.5px;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.home-input-card {
+  background: var(--card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  padding: 22px 24px;
+  margin-bottom: 22px;
+  box-shadow: var(--shadow-sm);
+}
+.home-input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.home-input {
+  flex: 1;
+  height: 48px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-family: inherit;
+  background: var(--bg-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.home-input:focus {
+  border-color: var(--primary);
+  background: var(--card);
+}
+.home-input::placeholder {
+  color: var(--muted-soft);
+}
+.home-input-send {
+  height: 48px;
+  padding: 0 22px;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.home-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.home-chips-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+.home-chip {
+  background: var(--primary-softer);
+  border-color: var(--border-soft);
+}
+.home-input-hint {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* Action row at the bottom of the input card (Activity / Custom water) */
+.home-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* Inline diary card on Home (was a separate card on the old Diary view) */
+.home-diary-card {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+/* Tablet sizing for Home */
+@media (max-width: 1100px) {
+  .home-main { max-width: 100%; }
+  .home-diary-card { max-width: 100%; }
+}
+
+@media (max-width: 700px) {
+  .home-greeting { font-size: 26px; }
+  .briefing-card { padding: 18px 20px; }
+  .briefing-lead { font-size: 17px; }
+  .home-input-card { padding: 18px 18px; }
+  .home-input { height: 44px; font-size: 14.5px; }
+  .home-input-send { height: 44px; padding: 0 18px; }
+  .home-add-row { gap: 6px; }
+}
+
+/* ============================================
    TREND VIEW
    ============================================ */
 .trend-headline {

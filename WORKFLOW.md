@@ -4,11 +4,21 @@ The protocol for changing the live site without breaking it.
 
 ---
 
+## The three scripts
+
+| Script | What it does | When to run |
+|---|---|---|
+| `save.bat "msg"` | Stages + commits locally. Does **not** push or deploy. | After every meaningful local change you might want to roll back to. Use liberally. |
+| `ship.bat "msg"` | Stages + commits + pushes to GitHub. Then you click cPanel deploy. | When you're satisfied with one or more saves and ready to make it live. |
+| `rollback.bat` | Reverts the last commit (whether `save` or `ship`). | When something just went wrong. |
+
+The mental model: `save` is a checkpoint, `ship` is a publish. They're not the same operation.
+
 ## The three rules
 
 1. **Never edit files directly on the Bluehost server.** All changes start locally, get committed to Git, get pushed to GitHub, then get pulled by Bluehost. The server is downstream — never upstream.
-2. **Test locally before every push.** Open `app/index.html` in a real browser. Click through Today, Trend, Insights, Coach. If anything errors in the Console, do not push.
-3. **One change per commit.** A commit should be revertible without losing other work. "Fix net-deficit calculation" is a commit. "Net deficit + add 30 foods + redesign Today" is three commits.
+2. **Save often during local iteration.** Every meaningful change Claude builds, run `save.bat` before starting the next chunk. Each save is a recoverable checkpoint.
+3. **Ship deliberately.** Only run `ship.bat` when you've decided the current state should be live. Multiple saves can be shipped together in one push.
 
 ---
 
