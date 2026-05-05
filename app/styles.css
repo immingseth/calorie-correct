@@ -1316,6 +1316,74 @@ html, body {
   flex-wrap: wrap;
 }
 
+/* ===========================================================
+   Chat strip — persistent Coach chat used at top of Diary & Results
+   Bubbles render above the input card whenever there's a lastTurn.
+   =========================================================== */
+.chat-strip {
+  margin-bottom: 22px;
+}
+.chat-input-card {
+  margin-bottom: 0;
+}
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.chat-turn-user,
+.chat-turn-coach {
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border-soft);
+  line-height: 1.45;
+}
+.chat-turn-user {
+  background: var(--bg-soft);
+  align-self: flex-end;
+  max-width: 85%;
+}
+.chat-turn-coach {
+  background: var(--primary-softer, #eef3ea);
+  border-color: var(--primary-light, #9DBA82);
+  align-self: flex-start;
+  max-width: 92%;
+}
+.chat-turn-coach.chat-turn-log {
+  background: var(--primary-softer, #eef3ea);
+  border-left: 3px solid var(--primary, #769B6C);
+}
+.chat-turn-coach.chat-turn-error {
+  background: #fdecea;
+  border-color: #f5c2bd;
+  border-left: 3px solid #c0392b;
+}
+.chat-turn-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.chat-turn-coach .chat-turn-label {
+  color: var(--primary-dark, #446957);
+}
+.chat-turn-coach.chat-turn-error .chat-turn-label {
+  color: #a93226;
+}
+.chat-turn-text {
+  font-size: 14.5px;
+  color: var(--text);
+}
+.chat-turn-text strong {
+  color: var(--primary-dark, #446957);
+  font-weight: 700;
+}
+
 /* Inline diary card on Home (was a separate card on the old Diary view) */
 .home-diary-card {
   max-width: 760px;
@@ -1336,6 +1404,9 @@ html, body {
   .home-input { height: 44px; font-size: 14.5px; }
   .home-input-send { height: 44px; padding: 0 18px; }
   .home-add-row { gap: 6px; }
+  .chat-turn-user,
+  .chat-turn-coach { max-width: 100%; padding: 9px 12px; }
+  .chat-turn-text { font-size: 14px; }
 }
 
 /* ============================================

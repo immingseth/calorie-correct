@@ -1622,6 +1622,11 @@ const ICON = {
    ROUTER & UNDO
    =================================================== */
 let currentView = 'diary';
+
+/* Coach chat state — persists for the session, resets on page reload.
+ * lastTurn holds the most-recent user input and coach response, displayed
+ * as a single-turn chat bubble above the input on Diary and Results. */
+let lastTurn = null; // { user: string, coach: string, kind: 'log' | 'coach' | 'error' }
 /* Diary view's currently-shown date. Persists across navigation within a session
  * but resets to today on page reload. Use getSelectedDate() to read it (lazy
  * default to today if not initialized). */
@@ -1814,6 +1819,191 @@ function generateDailyBriefing(s) {
   };
 }
 
+/* ===================================================
+   COACH CHAT — placeholder response generator until
+   the real Claude backend lands in the next phase.
+   =================================================== */
+
+/* Generate a Coach response for a successful meal log.
+ * Pulls in actual data context (cals, macros, remaining, target) and
+ * varies phrasing slightly so it doesn't feel canned. */
+function coachLogResponse(meal, dayDate) {
+  const target = getDailyTarget(state);
+  const consumed = getDailyCalories(state, dayDate);
+  const remaining = target - consumed;
+  const burnRaw = getDailyExerciseBurn(state, dayDate);
+  const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
+  const burnAdj = Math.round(burnRaw * trackerAcc);
+  const dayNet = consumed - burnAdj;
+  const itemsList = meal.items.map(i => i.name).join(', ');
+
+  // Pick a varied opener — feels less robotic
+  const openers = [
+    `Logged ${meal.totalCal} cal.`,
+    `Got it — ${meal.totalCal} cal.`,
+    `Done. ${meal.totalCal} cal in.`,
+    `${itemsList} — ${meal.totalCal} cal logged.`,
+  ];
+  const opener = openers[Math.floor(Math.random() * openers.length)];
+
+  // Status callout based on remaining
+  let status;
+  if (remaining > 400) {
+    status = `You've got <strong>${remaining.toLocaleString()} cal</strong> left for the day.`;
+  } else if (remaining > 0) {
+    status = `<strong>${remaining.toLocaleString()} cal</strong> left — keep dinner on the lighter side.`;
+  } else if (remaining > -300) {
+    status = `That puts you ${Math.abs(remaining)} cal over target. Not a problem; one day doesn't move the trend.`;
+  } else {
+    status = `You're ${Math.abs(remaining).toLocaleString()} over today. The week's average is what matters — see how tomorrow goes.`;
+  }
+
+  return `${opener} ${status}`;
+}
+
+/* Generate a Coach response for input that didn't parse as a meal.
+ * For now, polite placeholder + the canned coach response if the question
+ * matches a known topic. Real Claude wires up later. */
+function coachQuestionResponse(text) {
+  // Try the existing canned coach matcher first
+  const cannedHtml = getCoachResponse(text);
+  if (cannedHtml && !cannedHtml.includes("I'm a prototype")) {
+    // We have a real canned answer — strip <p> tags and use the text
+    const stripped = cannedHtml.replace(/<p>/g, '').replace(/<\/p>/g, ' ').replace(/<[^>]+>/g, '').trim();
+    return stripped;
+  }
+  // No canned match — friendly placeholder
+  return `I hear you. Real conversation is coming in the next update — for now I can log meals if you describe them ("turkey sandwich and an apple") and answer questions about plateaus, exercise, restaurants, weight fluctuations, drinks, cravings, and weekly weigh-ins.`;
+}
+
+/* Render the persistent chat surface (input + last response bubble).
+ * Used at the top of Diary and Results. */
+function renderChatStrip(opts) {
+  const placeholder = opts && opts.placeholder ? opts.placeholder : "What's on your mind?";
+  const recent = (opts && opts.showChips !== false) ? getRecentFoods(state, 5) : [];
+  return `
+    <div class="chat-strip">
+      ${lastTurn ? `
+        <div class="chat-turn">
+          <div class="chat-turn-user">
+            <span class="chat-turn-label">You</span>
+            <span class="chat-turn-text">${escapeAttr(lastTurn.user)}</span>
+          </div>
+          <div class="chat-turn-coach chat-turn-${lastTurn.kind}">
+            <span class="chat-turn-label">Coach</span>
+            <span class="chat-turn-text">${lastTurn.coach}</span>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="home-input-card chat-input-card">
+        <div class="home-input-wrap">
+          <input class="home-input" id="chat-input" placeholder="${placeholder}" autocomplete="off" />
+          <button class="ai-input-btn" disabled title="Voice — coming soon" aria-label="Voice (coming soon)">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          <button class="ai-input-btn" disabled title="Photo — coming soon" aria-label="Photo (coming soon)">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>
+          <button class="btn btn-primary home-input-send" id="chat-send">Send</button>
+        </div>
+
+        ${recent.length > 0 ? `<div class="home-chips">
+          <span class="home-chips-label">Quick:</span>
+          ${recent.map((f, i) => `<button class="recent-chip home-chip" data-recent-idx="${i}">
+            <span class="recent-chip-name">${escapeAttr(f.name)}</span>
+            <span class="recent-chip-cal">${f.lastCal}</span>
+          </button>`).join('')}
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+/* Wire chat input + chips. Called after each view that includes renderChatStrip(). */
+function wireChatStrip() {
+  const inp = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send');
+  if (!inp || !sendBtn) return;
+
+  const submit = () => {
+    const text = inp.value.trim();
+    if (!text) return;
+    const items = parseMealText(text);
+    // Detect whether parser found a real food match (vs. a generic estimate placeholder)
+    const hasMatch = items.some(it => it.source === 'matched');
+
+    if (hasMatch) {
+      // Treat as meal log
+      const now = new Date();
+      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+      const meal = {
+        id: Date.now(),
+        date: getSelectedDate(),
+        time,
+        mealType: guessMealType(now.getHours()),
+        raw: text,
+        items,
+        totalCal,
+        source: 'ai',
+      };
+      state.meals.push(meal);
+      recordAction({ type: 'create-meal', meal });
+      saveState();
+      lastTurn = {
+        user: text,
+        coach: coachLogResponse(meal, getSelectedDate()),
+        kind: 'log',
+      };
+    } else {
+      // Treat as a question / coaching input
+      lastTurn = {
+        user: text,
+        coach: coachQuestionResponse(text),
+        kind: 'coach',
+      };
+    }
+
+    inp.value = '';
+    navigate(currentView);
+  };
+
+  sendBtn.addEventListener('click', submit);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+
+  document.querySelectorAll('.home-chip[data-recent-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.recentIdx);
+      const recent = getRecentFoods(state, 5);
+      const food = recent[idx];
+      if (!food) return;
+      // Build a synthetic meal for the chip click and reuse the coach response
+      const now = new Date();
+      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const meal = {
+        id: Date.now(),
+        date: getSelectedDate(),
+        time,
+        mealType: guessMealType(now.getHours()),
+        raw: food.name,
+        items: [{ name: food.name, calories: food.lastCal, source: 'recent' }],
+        totalCal: food.lastCal,
+        source: 'recent',
+      };
+      state.meals.push(meal);
+      recordAction({ type: 'create-meal', meal });
+      saveState();
+      lastTurn = {
+        user: food.name,
+        coach: coachLogResponse(meal, getSelectedDate()),
+        kind: 'log',
+      };
+      navigate(currentView);
+    });
+  });
+}
+
 VIEW_RENDERERS.diary = function (c) {
   // Diary is scoped to selectedDate. Default is today; user can navigate to past days.
   const date = getSelectedDate();
@@ -1832,9 +2022,10 @@ VIEW_RENDERERS.diary = function (c) {
   const dayEntries = getDayEntries(state, date);
   const currentW = getCurrentWeight(state);
   const totalLoss = state.user.startWeight - currentW;
-  const recent = getRecentFoods(state, 5);
 
   c.innerHTML = `
+    ${renderChatStrip({ placeholder: isToday ? "What's on your mind?" : `Log to ${getSelectedDateLabel().toLowerCase()}…` })}
+
     <div class="diary-nav">
       <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
       <div class="diary-nav-center">
@@ -1860,27 +2051,6 @@ VIEW_RENDERERS.diary = function (c) {
       <div class="briefing-suggestion">${briefing.suggestion}</div>
     </div>` : ''}
 
-    <div class="home-input-card">
-      <div class="home-input-wrap">
-        <input class="home-input" id="home-input" placeholder="${isToday ? "What's on your mind?" : `Log to ${getSelectedDateLabel().toLowerCase()}…`}" autocomplete="off" />
-        <button class="ai-input-btn" disabled title="Voice — coming soon with Claude AI" aria-label="Voice (coming soon)">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-        </button>
-        <button class="ai-input-btn" disabled title="Photo — coming soon with Claude AI" aria-label="Photo (coming soon)">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        </button>
-        <button class="btn btn-primary home-input-send" id="home-input-send">Send</button>
-      </div>
-
-      ${recent.length > 0 ? `<div class="home-chips">
-        <span class="home-chips-label">Quick:</span>
-        ${recent.map((f, i) => `<button class="recent-chip home-chip" data-recent-idx="${i}">
-          <span class="recent-chip-name">${escapeAttr(f.name)}</span>
-          <span class="recent-chip-cal">${f.lastCal}</span>
-        </button>`).join('')}
-      </div>` : ''}
-    </div>
-
     <div class="card home-diary-card">
       <div class="diary-header">
         <div class="section-h" style="margin: 0;">${isToday ? "Today's diary" : `Diary · ${getSelectedDateLabel().toLowerCase()}`}</div>
@@ -1905,42 +2075,8 @@ VIEW_RENDERERS.diary = function (c) {
   const todayBtn = document.getElementById('diary-today');
   if (todayBtn) todayBtn.addEventListener('click', () => { setSelectedDate(today); navigate(currentView); });
 
-  // Wire input — uses the existing parser as the backend for now.
-  // Parsed meal saves to the SELECTED date (so logging while on a past day fills that day).
-  const homeInput = document.getElementById('home-input');
-  const sendBtn = document.getElementById('home-input-send');
-  const handleHomeSubmit = () => {
-    const text = homeInput.value.trim();
-    if (!text) return;
-    const items = parseMealText(text);
-    if (!items.length) return;
-    const now = new Date();
-    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
-    const meal = {
-      id: Date.now(),
-      date: getSelectedDate(),
-      time,
-      mealType: guessMealType(now.getHours()),
-      raw: text,
-      items,
-      totalCal,
-      source: 'ai',
-    };
-    state.meals.push(meal);
-    recordAction({ type: 'create-meal', meal });
-    saveState();
-    homeInput.value = '';
-    toast(`Logged ${totalCal} cal · click to edit`, { undo: true });
-    navigate('diary');
-  };
-  if (sendBtn) sendBtn.addEventListener('click', handleHomeSubmit);
-  if (homeInput) homeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleHomeSubmit(); });
-
-  // Wire quick chips (recent foods)
-  c.querySelectorAll('.home-chip[data-recent-idx]').forEach(btn => {
-    btn.addEventListener('click', () => logRecentFood(parseInt(btn.dataset.recentIdx)));
-  });
+  // Wire the chat input + quick chips
+  wireChatStrip();
 
   // Diary entry edit handlers
   c.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
@@ -2743,8 +2879,10 @@ VIEW_RENDERERS.results = function (c) {
   const progress = getGoalProgress(state);
 
   c.innerHTML = `
+    ${renderChatStrip({ placeholder: "Ask about your progress, log a meal, or just chat", showChips: false })}
+
     <div class="view-header">
-      <div class="view-eyebrow">PROGRESS</div>
+      <div class="view-eyebrow">RESULTS</div>
       <div class="trend-headline">
         <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
         <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
@@ -2791,6 +2929,9 @@ VIEW_RENDERERS.results = function (c) {
   if (methLink) methLink.addEventListener('click', (e) => { e.preventDefault(); navigate('methodology'); });
   const toggleBtn = document.getElementById('weight-log-toggle');
   if (toggleBtn) toggleBtn.addEventListener('click', () => { weightLogShowAll = !weightLogShowAll; navigate(currentView); });
+
+  // Wire the chat strip (input + Coach response)
+  wireChatStrip();
 
   setTimeout(() => {
     renderProgressChart(state, cal, progressRange);
