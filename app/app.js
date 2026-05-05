@@ -1621,7 +1621,7 @@ const ICON = {
 /* ===================================================
    ROUTER & UNDO
    =================================================== */
-let currentView = 'home';
+let currentView = 'diary';
 /* Diary view's currently-shown date. Persists across navigation within a session
  * but resets to today on page reload. Use getSelectedDate() to read it (lazy
  * default to today if not initialized). */
@@ -1814,27 +1814,42 @@ function generateDailyBriefing(s) {
   };
 }
 
-VIEW_RENDERERS.home = function (c) {
-  // Home is always TODAY. Past days are accessible via clicking entries on Progress.
+VIEW_RENDERERS.diary = function (c) {
+  // Diary is scoped to selectedDate. Default is today; user can navigate to past days.
+  const date = getSelectedDate();
   const today = todayISO();
-  setSelectedDate(today); // ensure all logging actions write to today
-  const briefing = generateDailyBriefing(state);
+  const isToday = date === today;
+  const briefing = isToday ? generateDailyBriefing(state) : null;
   const target = getDailyTarget(state);
-  const consumed = getDailyCalories(state, today);
+  const consumed = getDailyCalories(state, date);
   const remaining = target - consumed;
   const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
-  const burnRaw = getDailyExerciseBurn(state, today);
+  const burnRaw = getDailyExerciseBurn(state, date);
   const burnAdj = Math.round(burnRaw * trackerAcc);
-  const netToday = consumed - burnAdj;
-  const macros = getDailyMacros(state, today);
-  const water = getDailyWater(state, today);
-  const todayEntries = getDayEntries(state, today);
+  const dayNet = consumed - burnAdj;
+  const macros = getDailyMacros(state, date);
+  const water = getDailyWater(state, date);
+  const dayEntries = getDayEntries(state, date);
   const currentW = getCurrentWeight(state);
   const totalLoss = state.user.startWeight - currentW;
   const recent = getRecentFoods(state, 5);
 
   c.innerHTML = `
-    <div class="home-greeting">${briefing.greeting}</div>
+    <div class="diary-nav">
+      <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
+      <div class="diary-nav-center">
+        <div class="diary-nav-label">${getSelectedDateLabel()}</div>
+        <div class="diary-nav-date">${formatHumanDate(date)}</div>
+      </div>
+      <button class="diary-nav-btn" id="diary-next" title="Next day">›</button>
+      <button class="diary-nav-btn diary-nav-cal" id="diary-cal" title="Pick a date">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </button>
+      <input type="date" id="diary-cal-input" class="diary-cal-input" value="${date}" />
+      ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
+    </div>
+
+    ${isToday ? `<div class="home-greeting">${briefing.greeting}</div>
     <div class="home-stats-line">${currentW.toFixed(1)} lb · ${totalLoss >= 0 ? '↓' : '↑'} ${Math.abs(totalLoss).toFixed(1)} lb total · ${remaining > 0 ? remaining.toLocaleString() + ' cal left today' : 'over target by ' + Math.abs(remaining)}</div>
 
     <div class="briefing-card">
@@ -1843,11 +1858,11 @@ VIEW_RENDERERS.home = function (c) {
       ${briefing.body ? `<div class="briefing-body">${briefing.body}</div>` : ''}
       ${briefing.extra ? `<div class="briefing-extra">${briefing.extra}</div>` : ''}
       <div class="briefing-suggestion">${briefing.suggestion}</div>
-    </div>
+    </div>` : ''}
 
     <div class="home-input-card">
       <div class="home-input-wrap">
-        <input class="home-input" id="home-input" placeholder="What's on your mind?" autocomplete="off" />
+        <input class="home-input" id="home-input" placeholder="${isToday ? "What's on your mind?" : `Log to ${getSelectedDateLabel().toLowerCase()}…`}" autocomplete="off" />
         <button class="ai-input-btn" disabled title="Voice — coming soon with Claude AI" aria-label="Voice (coming soon)">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
         </button>
@@ -1864,35 +1879,34 @@ VIEW_RENDERERS.home = function (c) {
           <span class="recent-chip-cal">${f.lastCal}</span>
         </button>`).join('')}
       </div>` : ''}
-
-      <div class="water-quick-add" style="margin-top: 14px;">
-        <span class="water-quick-label">Water:</span>
-        <button class="water-chip" data-water-add="8">8 oz</button>
-        <button class="water-chip" data-water-add="12">12 oz</button>
-        <button class="water-chip" data-water-add="16">16 oz</button>
-        <button class="water-chip" data-water-add="32">32 oz</button>
-      </div>
-
-      <div class="home-add-row">
-        <button class="btn btn-secondary btn-sm" id="home-add-exercise">+ Log activity</button>
-        <button class="btn btn-secondary btn-sm" id="home-add-water">+ Custom water</button>
-      </div>
     </div>
 
     <div class="card home-diary-card">
       <div class="diary-header">
-        <div class="section-h" style="margin: 0;">Today's diary</div>
-        <div class="diary-count">${todayEntries.length} ${todayEntries.length === 1 ? 'entry' : 'entries'}</div>
+        <div class="section-h" style="margin: 0;">${isToday ? "Today's diary" : `Diary · ${getSelectedDateLabel().toLowerCase()}`}</div>
+        <div class="diary-count">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
       </div>
       <div class="diary-stream">
-        ${todayEntries.length ? todayEntries.map(renderDiaryEntry).join('') : '<div class="diary-empty">Nothing logged yet today.</div>'}
+        ${dayEntries.length ? dayEntries.map(renderDiaryEntry).join('') : `<div class="diary-empty">Nothing logged ${isToday ? 'yet today' : 'this day'}.</div>`}
       </div>
-      ${renderDailyTotalsBlock(consumed, burnAdj, netToday, target, macros, water)}
+      ${renderDailyTotalsBlock(consumed, burnAdj, dayNet, target, macros, water)}
     </div>
   `;
 
+  // Wire date navigation
+  document.getElementById('diary-prev').addEventListener('click', () => { shiftSelectedDate(-1); navigate(currentView); });
+  document.getElementById('diary-next').addEventListener('click', () => { shiftSelectedDate(1); navigate(currentView); });
+  const calBtn = document.getElementById('diary-cal');
+  const calInput = document.getElementById('diary-cal-input');
+  if (calBtn && calInput) {
+    calBtn.addEventListener('click', () => calInput.showPicker ? calInput.showPicker() : calInput.click());
+    calInput.addEventListener('change', (e) => { if (e.target.value) { setSelectedDate(e.target.value); navigate(currentView); } });
+  }
+  const todayBtn = document.getElementById('diary-today');
+  if (todayBtn) todayBtn.addEventListener('click', () => { setSelectedDate(today); navigate(currentView); });
+
   // Wire input — uses the existing parser as the backend for now.
-  // Parsed meal saves directly. User can correct via the inline diary entry click.
+  // Parsed meal saves to the SELECTED date (so logging while on a past day fills that day).
   const homeInput = document.getElementById('home-input');
   const sendBtn = document.getElementById('home-input-send');
   const handleHomeSubmit = () => {
@@ -1905,7 +1919,7 @@ VIEW_RENDERERS.home = function (c) {
     const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
     const meal = {
       id: Date.now(),
-      date: today,
+      date: getSelectedDate(),
       time,
       mealType: guessMealType(now.getHours()),
       raw: text,
@@ -1918,24 +1932,15 @@ VIEW_RENDERERS.home = function (c) {
     saveState();
     homeInput.value = '';
     toast(`Logged ${totalCal} cal · click to edit`, { undo: true });
-    navigate('home');
+    navigate('diary');
   };
   if (sendBtn) sendBtn.addEventListener('click', handleHomeSubmit);
   if (homeInput) homeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleHomeSubmit(); });
 
-  // Wire quick chips (recent foods + water)
+  // Wire quick chips (recent foods)
   c.querySelectorAll('.home-chip[data-recent-idx]').forEach(btn => {
     btn.addEventListener('click', () => logRecentFood(parseInt(btn.dataset.recentIdx)));
   });
-  c.querySelectorAll('[data-water-add]').forEach(btn => {
-    btn.addEventListener('click', () => addWaterEntry(parseInt(btn.dataset.waterAdd)));
-  });
-
-  // Add buttons
-  const addEx = document.getElementById('home-add-exercise');
-  if (addEx) addEx.addEventListener('click', () => openExerciseAdd());
-  const addWat = document.getElementById('home-add-water');
-  if (addWat) addWat.addEventListener('click', () => openWaterAdd());
 
   // Diary entry edit handlers
   c.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
@@ -2338,7 +2343,7 @@ function logRecentFood(idx) {
   recordAction({ type: 'create-meal', meal });
   saveState();
   toast(`Logged ${food.name} (${food.lastCal} cal)`, { undo: true });
-  navigate('home');
+  navigate('diary');
 }
 
 function wireRecentFoodsStrip() {
@@ -2411,7 +2416,7 @@ function copyYesterdayToToday() {
   state.exercises = (state.exercises || []).concat(newExercises);
   saveState();
   toast(`Copied ${newMeals.length} meals and ${newExercises.length} workouts from the day before.`);
-  navigate('home');
+  navigate('diary');
 }
 
 function wireCopyYesterdayBtn() {
@@ -2457,7 +2462,7 @@ function logSavedMeal(savedId) {
   recordAction({ type: 'create-meal', meal });
   saveState();
   toast(`Logged ${saved.name} (${totalCal} cal)`, { undo: true });
-  navigate('home');
+  navigate('diary');
 }
 
 function wireSavedMealsStrip() {
@@ -2506,7 +2511,7 @@ function logFoodFromSearch(name, cal) {
   recordAction({ type: 'create-meal', meal });
   saveState();
   toast(`Logged ${name} (${cal} cal)`, { undo: true });
-  navigate('home');
+  navigate('diary');
 }
 
 function renderTodayLogger() {
@@ -2698,7 +2703,7 @@ function wireTodayLogger() {
       recordAction({ type: 'create-meal', meal });
       saveState();
       toast(`Logged ${cal} cal`, { undo: true });
-      navigate('home');
+      navigate('diary');
     };
     document.getElementById('today-numeric-save').addEventListener('click', handleSave);
     document.getElementById('today-numeric-cal').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleSave(); });
@@ -2716,7 +2721,7 @@ function saveTodayParse() {
   saveState();
   todayParseDraft = null;
   toast(`Logged ${totalCal} cal to ${meal.mealType}`, { undo: true });
-  navigate('home');
+  navigate('diary');
 }
 
 /* ===================================================
@@ -2729,7 +2734,7 @@ function saveTodayParse() {
    =================================================== */
 let progressRange = 90;
 
-VIEW_RENDERERS.progress = function (c) {
+VIEW_RENDERERS.results = function (c) {
   const cal = getCalibration(state);
   const startW = state.user.startWeight;
   const currentW = getCurrentWeight(state);
@@ -3399,7 +3404,7 @@ function openExerciseAdd() {
       const exercise = { id: Date.now(), date: getSelectedDate(), time, type: selectedTypeId, typeName: t2.name, typeEmoji: t2.emoji, duration: dur, caloriesBurned: cal, note, source: 'manual' };
       state.exercises.push(exercise);
       recordAction({ type: 'create-exercise', exercise });
-      saveState(); closeModal(); toast(`Logged ${t2.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('home');
+      saveState(); closeModal(); toast(`Logged ${t2.name} · ${dur} min · ${cal} cal`, { undo: true }); navigate('diary');
     });
   };
 
@@ -3513,7 +3518,7 @@ function openSettings() {
     <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Close</button></div>`;
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
-  document.getElementById('reset-demo-btn').addEventListener('click', () => { if (!confirm('Reset to demo data?')) return; resetToDemoData(); closeModal(); toast('Demo data restored'); navigate('home'); });
+  document.getElementById('reset-demo-btn').addEventListener('click', () => { if (!confirm('Reset to demo data?')) return; resetToDemoData(); closeModal(); toast('Demo data restored'); navigate('diary'); });
   document.getElementById('start-fresh-btn').addEventListener('click', () => { if (!confirm('Clear all data and start fresh?')) return; closeModal(); startOnboarding(); });
   document.getElementById('import-seth-btn').addEventListener('click', () => { if (!confirm("Replace data with Seth's spreadsheet?")) return; importSethSpreadsheet(); });
   document.getElementById('settings-activity').addEventListener('change', (e) => { state.user.activityLevel = e.target.value; saveState(); toast(`Activity level updated`); });
@@ -3527,7 +3532,7 @@ function openSettings() {
   document.getElementById('export-json-btn').addEventListener('click', () => exportData('json'));
   document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
   const restoreBtn = document.getElementById('restore-backup-btn');
-  if (restoreBtn) restoreBtn.addEventListener('click', () => { if (!confirm('Restore from auto-backup?')) return; if (restoreFromBackup()) { closeModal(); toast('Restored from backup'); navigate('home'); } else toast('No backup found'); });
+  if (restoreBtn) restoreBtn.addEventListener('click', () => { if (!confirm('Restore from auto-backup?')) return; if (restoreFromBackup()) { closeModal(); toast('Restored from backup'); navigate('diary'); } else toast('No backup found'); });
   document.getElementById('open-methodology-btn').addEventListener('click', () => { closeModal(); navigate('methodology'); });
   const rateSlider = document.getElementById('settings-rate');
   if (rateSlider) {
@@ -3854,7 +3859,7 @@ function completeOnboarding() {
   document.getElementById('user-name').textContent = state.user.name;
   document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
   toast('Welcome to Calorie Correct.');
-  navigate('home');
+  navigate('diary');
 }
 
 /* ===================================================
@@ -3872,14 +3877,14 @@ function init() {
     state = makeBlankState();
     document.getElementById('user-name').textContent = state.user.name;
     document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
-    navigate('home');
+    navigate('diary');
     startOnboarding();
     return;
   }
 
   document.getElementById('user-name').textContent = state.user.name;
   document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
-  navigate('home');
+  navigate('diary');
 
   const params = new URLSearchParams(window.location.search);
   if (params.get('onboard') === '1') {
