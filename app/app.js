@@ -1751,18 +1751,13 @@ function getSelectedDateLabel() {
 }
 const VIEW_RENDERERS = {};
 
+/* Single-view app — no more tab navigation. navigate() exists as a compat
+ * shim for legacy callers; it just re-renders the whole app. */
 function navigate(view) {
-  const isSameView = view === currentView;
-  const prevScroll = isSameView ? window.scrollY : 0;
-  currentView = view;
-  document.querySelectorAll('[data-view]').forEach(el => {
-    el.classList.toggle('active', el.dataset.view === view);
-  });
-  const container = document.getElementById('view-container');
-  container.innerHTML = '';
-  const renderer = VIEW_RENDERERS[view];
-  if (renderer) renderer(container);
-  if (isSameView) window.scrollTo(0, prevScroll); else window.scrollTo(0, 0);
+  const prevScroll = window.scrollY;
+  currentView = view || 'app';
+  renderApp();
+  window.scrollTo(0, prevScroll);
 }
 
 let lastAction = null;
@@ -2187,8 +2182,13 @@ function wireChatStrip() {
   });
 }
 
-VIEW_RENDERERS.diary = function (c) {
-  // Diary is scoped to selectedDate. Default is today; user can navigate to past days.
+/* Render the whole app — center column (Coach + Results) + right panel
+ * (today's log + macros + diary stream). Single renderer; no more tab nav. */
+function renderApp() {
+  const centerC = document.getElementById('view-container');
+  const rightC = document.getElementById('right-panel-content');
+  if (!centerC || !rightC) return;
+
   const date = getSelectedDate();
   const today = todayISO();
   const isToday = date === today;
@@ -2202,15 +2202,55 @@ VIEW_RENDERERS.diary = function (c) {
   const water = getDailyWater(state, date);
   const dayEntries = getDayEntries(state, date);
 
-  // Coach-first: seed proactive greeting once per day (only for "today" view).
+  const cal = getCalibration(state);
+  const startW = state.user.startWeight;
+  const currentW = getCurrentWeight(state);
+  const totalLoss = startW - currentW;
+  const days = state.weights.length > 1 ? daysBetween(state.weights[0].date, state.weights[state.weights.length - 1].date) : 0;
+  const progress = getGoalProgress(state);
+
+  // Coach-first: seed proactive greeting once per day
   if (isToday) seedDailyGreetingIfNeeded();
 
-  c.innerHTML = `
+  // ============ CENTER: Coach chat + Results ============
+  centerC.innerHTML = `
     ${renderChatStrip({
-      placeholder: isToday ? "Tell Coach what you ate, or ask anything…" : `Log to ${getSelectedDateLabel().toLowerCase()}…`,
+      placeholder: "Tell Coach what you ate, or ask anything…",
       big: true,
     })}
 
+    <div class="view-header">
+      <div class="view-eyebrow">Results</div>
+      <div class="trend-headline">
+        <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
+        <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
+      </div>
+    </div>
+
+    ${renderProgressCard(progress)}
+
+    ${renderAccuracyCard(state)}
+
+    <div class="chart-card">
+      <div class="date-range-row">
+        <div class="bar-chart-legend">
+          <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
+          <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
+          <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
+        </div>
+        <div class="date-range-tabs" id="progress-range-tabs">
+          <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
+          <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
+          <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
+          <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
+        </div>
+      </div>
+      <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
+    </div>
+  `;
+
+  // ============ RIGHT: date nav + today panel + diary stream ============
+  rightC.innerHTML = `
     <div class="diary-nav diary-nav-compact">
       <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
       <div class="diary-nav-center">
@@ -2225,39 +2265,45 @@ VIEW_RENDERERS.diary = function (c) {
       ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
     </div>
 
-    <div class="card home-diary-card diary-card-quiet">
-      <div class="diary-header">
-        <div class="section-h" style="margin: 0;">${isToday ? "Today's log" : `Log · ${getSelectedDateLabel().toLowerCase()}`}</div>
-        <div class="diary-count">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
-      </div>
+    ${renderDailyTotalsBlock(consumed, burnAdj, dayNet, target, macros, water)}
+
+    <div class="rp-diary">
+      <div class="rp-section-head">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
       <div class="diary-stream">
         ${dayEntries.length ? dayEntries.map(renderDiaryEntry).join('') : `<div class="diary-empty">Nothing logged ${isToday ? 'yet today' : 'this day'}.</div>`}
       </div>
-      ${renderDailyTotalsBlock(consumed, burnAdj, dayNet, target, macros, water)}
     </div>
   `;
 
-  // Wire date navigation
-  document.getElementById('diary-prev').addEventListener('click', () => { shiftSelectedDate(-1); navigate(currentView); });
-  document.getElementById('diary-next').addEventListener('click', () => { shiftSelectedDate(1); navigate(currentView); });
+  // Wire date navigation (right panel)
+  document.getElementById('diary-prev').addEventListener('click', () => { shiftSelectedDate(-1); renderApp(); });
+  document.getElementById('diary-next').addEventListener('click', () => { shiftSelectedDate(1); renderApp(); });
   const calBtn = document.getElementById('diary-cal');
   const calInput = document.getElementById('diary-cal-input');
   if (calBtn && calInput) {
     calBtn.addEventListener('click', () => calInput.showPicker ? calInput.showPicker() : calInput.click());
-    calInput.addEventListener('change', (e) => { if (e.target.value) { setSelectedDate(e.target.value); navigate(currentView); } });
+    calInput.addEventListener('change', (e) => { if (e.target.value) { setSelectedDate(e.target.value); renderApp(); } });
   }
   const todayBtn = document.getElementById('diary-today');
-  if (todayBtn) todayBtn.addEventListener('click', () => { setSelectedDate(today); navigate(currentView); });
+  if (todayBtn) todayBtn.addEventListener('click', () => { setSelectedDate(today); renderApp(); });
 
-  // Wire the chat input + quick chips
+  // Diary entry edit handlers (right panel)
+  rightC.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
+  rightC.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
+  rightC.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
+  rightC.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
+
+  // Wire center column interactions
+  centerC.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); renderApp(); }));
+  wireAccuracyCard();
   wireChatStrip();
 
-  // Diary entry edit handlers
-  c.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
-  c.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
-  c.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
-  c.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
-};
+  // Render the trend chart (after DOM is in)
+  setTimeout(() => { renderProgressChart(state, cal, progressRange); }, 10);
+}
+
+/* Legacy alias — older code calls VIEW_RENDERERS.diary; keep for compat. */
+VIEW_RENDERERS.diary = function () { renderApp(); };
 
 /* Add a water entry to the selected date. Used by the quick-add chips. */
 function addWaterEntry(oz) {
@@ -3097,59 +3143,8 @@ function saveTodayParse() {
    =================================================== */
 let progressRange = 90;
 
-VIEW_RENDERERS.results = function (c) {
-  const cal = getCalibration(state);
-  const startW = state.user.startWeight;
-  const currentW = getCurrentWeight(state);
-  const totalLoss = startW - currentW;
-  const days = state.weights.length > 1 ? daysBetween(state.weights[0].date, state.weights[state.weights.length - 1].date) : 0;
-  const progress = getGoalProgress(state);
-
-  c.innerHTML = `
-    ${renderChatStrip({ placeholder: "Ask about your progress, log a meal, or just chat", showChips: false, showHint: false })}
-
-    <div class="view-header">
-      <div class="view-eyebrow">RESULTS</div>
-      <div class="trend-headline">
-        <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
-        <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
-      </div>
-    </div>
-
-    ${renderProgressCard(progress)}
-
-    ${renderAccuracyCard(state)}
-
-    <div class="chart-card">
-      <div class="date-range-row">
-        <div class="bar-chart-legend">
-          <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
-          <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
-          <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
-        </div>
-        <div class="date-range-tabs" id="progress-range-tabs">
-          <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
-          <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
-          <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
-          <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
-        </div>
-      </div>
-      <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
-    </div>
-  `;
-
-  c.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); navigate(currentView); }));
-
-  // Wire the accuracy sliders (live update on drag, persist on release)
-  wireAccuracyCard();
-
-  // Wire the chat strip (input + Coach response)
-  wireChatStrip();
-
-  setTimeout(() => {
-    renderProgressChart(state, cal, progressRange);
-  }, 10);
-};
+/* Legacy alias — older code calls VIEW_RENDERERS.results; keep for compat. */
+VIEW_RENDERERS.results = function () { renderApp(); };
 
 /* Simplified trend chart — daily dots, 7-day average, goal line. No
  * "predicted from logging" overlay (was visually busy, low signal). */
