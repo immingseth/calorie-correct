@@ -2793,10 +2793,87 @@ html, body {
   color: var(--primary-dark);
   font-weight: 600;
 }
+.accuracy-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* Two sliders inside the accuracy card */
+.accuracy-sliders {
+  margin-top: 22px;
+  padding-top: 22px;
+  border-top: 0.5px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.accuracy-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.accuracy-slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.accuracy-slider-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.accuracy-slider-value {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--primary-dark);
+  font-variant-numeric: tabular-nums;
+}
+.accuracy-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--border-soft);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+.accuracy-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid var(--card);
+  box-shadow: 0 1px 3px rgba(74, 99, 84, 0.25);
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.accuracy-slider::-webkit-slider-thumb:hover { background: var(--primary-dark); transform: scale(1.08); }
+.accuracy-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid var(--card);
+  box-shadow: 0 1px 3px rgba(74, 99, 84, 0.25);
+}
+.accuracy-slider-anchors {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
 @media (max-width: 700px) {
   .accuracy-card { padding: 18px 20px 16px; }
   .accuracy-number { font-size: 38px; }
   .accuracy-pct { font-size: 18px; }
+  .accuracy-slider-anchors { font-size: 10.5px; }
 }
 .progress-header {
   display: flex;

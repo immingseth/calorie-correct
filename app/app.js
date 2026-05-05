@@ -494,7 +494,8 @@ function makeBlankState() {
       startWeight: 180, goalWeight: 160,
       startDate: todayISO(),
       activityLevel: 'light',
-      trackerAccuracy: 1.0,
+      trackerAccuracy: 0.70,
+      foodAccuracy: 0.85,
       targetLossRate: 1.0,
       lastGreetingDate: null,
     },
@@ -519,7 +520,8 @@ function restoreFromBackup() {
 function migrateState(s) {
   if (!s.exercises) s.exercises = [];
   if (!s.user.activityLevel) s.user.activityLevel = 'light';
-  if (s.user.trackerAccuracy == null) s.user.trackerAccuracy = 1.0;
+  if (s.user.trackerAccuracy == null) s.user.trackerAccuracy = 0.70;
+  if (s.user.foodAccuracy == null) s.user.foodAccuracy = 0.85;
   if (s.user.targetLossRate == null) s.user.targetLossRate = 1.0; // lb/week
   if (s.user.lastGreetingDate === undefined) s.user.lastGreetingDate = null;
   if (!s.dayNotes) s.dayNotes = {}; // map of dateISO → note text
@@ -554,7 +556,8 @@ function resetToBlank(profile) {
       goalWeight: profile.goalWeight,
       startDate: todayISO(),
       activityLevel: 'light',
-      trackerAccuracy: 1.0,
+      trackerAccuracy: 0.70,
+      foodAccuracy: 0.85,
       targetLossRate: 1.0,
       lastGreetingDate: null,
     },
@@ -681,7 +684,8 @@ function generateDemoData() {
       goalWeight: 175,
       startDate: startISO,
       activityLevel: 'light',
-      trackerAccuracy: 1.0,
+      trackerAccuracy: 0.70,
+      foodAccuracy: 0.85,
       targetLossRate: 1.0,
       lastGreetingDate: null,
     },
@@ -2574,16 +2578,16 @@ function renderProgressCard(progress) {
 }
 
 /* Logging accuracy display — sits below the progress card on Results.
- * Shows one headline number (the overall accuracy %), a status pill
- * indicating whether it's estimated or observed, and a single line of
- * brand-voice copy explaining what the number means. */
+ * Headline % at the top, then two sliders for the underlying multipliers
+ * (calories out — tracker, calories in — food logging). Each slider has
+ * anchor labels. The headline updates live as the user drags. Brand-voice
+ * copy at the bottom adjusts for estimated vs observed mode. */
 function renderAccuracyCard(s) {
   const acc = getOverallAccuracy(s);
-  const trackerSourceName = (function () {
-    const id = s.user.trackerSource || 'none';
-    const t = TRACKER_SOURCES.find(x => x.id === id);
-    return t && id !== 'none' ? t.name : null;
-  })();
+  const trackerPct = Math.round((s.user.trackerAccuracy != null ? s.user.trackerAccuracy : 0.70) * 100);
+  const foodPct = Math.round((s.user.foodAccuracy != null ? s.user.foodAccuracy : 0.85) * 100);
+  const estimatePct = Math.round((trackerPct * foodPct) / 100);
+
   let copy;
   if (acc.status === 'observed') {
     if (acc.value >= 90) {
@@ -2596,17 +2600,90 @@ function renderAccuracyCard(s) {
       copy = `Your scale and your logs are far apart right now. We'll keep recalibrating; no need to log differently.`;
     }
   } else {
-    const sourceClause = trackerSourceName ? `your ${trackerSourceName}` : 'your tracker setup';
-    copy = `Estimate based on ${sourceClause}. We'll switch to your actual weight trend after about 14 days of logging.`;
+    copy = `Estimate based on your slider settings below. We'll switch to your actual weight trend after about 14 days of logging.`;
   }
+
+  const observedNote = acc.status === 'observed' && Math.abs(acc.value - estimatePct) >= 5
+    ? `<div class="accuracy-meta">Your sliders estimate ${estimatePct}%; your scale shows ${acc.value}%.</div>`
+    : '';
+
   return `<div class="accuracy-card">
     <div class="accuracy-head">
       <span class="accuracy-eyebrow">Logging accuracy</span>
       <span class="accuracy-status accuracy-status-${acc.status}">${acc.status === 'observed' ? `Observed · ${acc.days} days` : 'Estimated'}</span>
     </div>
-    <div class="accuracy-number">${acc.value}<span class="accuracy-pct">%</span></div>
+
+    <div class="accuracy-number" id="accuracy-headline">${acc.value}<span class="accuracy-pct">%</span></div>
     <div class="accuracy-copy">${copy}</div>
+    ${observedNote}
+
+    <div class="accuracy-sliders">
+      <div class="accuracy-slider-row">
+        <div class="accuracy-slider-head">
+          <span class="accuracy-slider-label">Calories out — tracker</span>
+          <span class="accuracy-slider-value" id="acc-tracker-val">${trackerPct}%</span>
+        </div>
+        <input type="range" min="30" max="100" step="5" value="${trackerPct}" id="acc-tracker-slider" class="accuracy-slider" />
+        <div class="accuracy-slider-anchors">
+          <span>None / gym machine</span>
+          <span>Wrist tracker</span>
+          <span>Chest strap</span>
+        </div>
+      </div>
+
+      <div class="accuracy-slider-row">
+        <div class="accuracy-slider-head">
+          <span class="accuracy-slider-label">Calories in — food logging</span>
+          <span class="accuracy-slider-value" id="acc-food-val">${foodPct}%</span>
+        </div>
+        <input type="range" min="60" max="100" step="5" value="${foodPct}" id="acc-food-slider" class="accuracy-slider" />
+        <div class="accuracy-slider-anchors">
+          <span>Eat out a lot</span>
+          <span>Mostly home</span>
+          <span>Weighed portions</span>
+        </div>
+      </div>
+    </div>
   </div>`;
+}
+
+/* Wire up the two accuracy sliders. Live-updates the headline number
+ * as the user drags. Persists on release (change event), but re-renders
+ * the whole card on commit so the copy and observed-note refresh. */
+function wireAccuracyCard() {
+  const tSlider = document.getElementById('acc-tracker-slider');
+  const fSlider = document.getElementById('acc-food-slider');
+  const tVal = document.getElementById('acc-tracker-val');
+  const fVal = document.getElementById('acc-food-val');
+  const headline = document.getElementById('accuracy-headline');
+  if (!tSlider || !fSlider) return;
+
+  const recompute = () => {
+    const t = parseInt(tSlider.value);
+    const f = parseInt(fSlider.value);
+    if (tVal) tVal.textContent = t + '%';
+    if (fVal) fVal.textContent = f + '%';
+    // Live headline only updates when in estimated mode; observed mode shows the truth-grounded value
+    const cal = getCalibration(state);
+    if (!(cal.ready && cal.trackingAccuracy != null) && headline) {
+      const combined = Math.round((t * f) / 100);
+      headline.innerHTML = `${combined}<span class="accuracy-pct">%</span>`;
+    }
+  };
+
+  tSlider.addEventListener('input', recompute);
+  fSlider.addEventListener('input', recompute);
+
+  tSlider.addEventListener('change', () => {
+    state.user.trackerAccuracy = parseInt(tSlider.value) / 100;
+    saveState();
+    navigate(currentView); // re-render to refresh copy + observed note
+  });
+  fSlider.addEventListener('change', () => {
+    state.user.foodAccuracy = parseInt(fSlider.value) / 100;
+    saveState();
+    navigate(currentView);
+  });
 }
 
 function renderPlateauBanner(s) {
@@ -3101,6 +3178,9 @@ VIEW_RENDERERS.results = function (c) {
   c.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); navigate(currentView); }));
   const methLink = document.getElementById('methodology-link');
   if (methLink) methLink.addEventListener('click', (e) => { e.preventDefault(); navigate('methodology'); });
+
+  // Wire the accuracy sliders (live update on drag, persist on release)
+  wireAccuracyCard();
 
   // Wire the chat strip (input + Coach response)
   wireChatStrip();
@@ -3806,9 +3886,6 @@ function openSettings() {
   const modal = document.getElementById('modal');
   const exp = getLastExportInfo();
   const bak = getBackupInfo();
-  const acc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
-  const accPct = Math.round(acc * 100);
-  const suggested = getSuggestedTrackerAccuracy(state);
   const rate = state.user.targetLossRate != null ? state.user.targetLossRate : 1.0;
   const ratePct = Math.round(rate * 100);
   const exportNote = exp.never ? 'Never exported. Back up now.' : `Last export: ${exp.days} day${exp.days !== 1 ? 's' : ''} ago${exp.overdue ? ' — time to back up' : ''}`;
@@ -3820,7 +3897,6 @@ function openSettings() {
       <div class="settings-row"><div><div class="settings-row-label">Import Seth's spreadsheet</div><div class="settings-row-detail">Loads 84 days of HEALTH data.</div></div><button class="btn btn-secondary btn-sm" id="import-seth-btn">Import</button></div>
       <div class="settings-row"><div><div class="settings-row-label">User profile</div><div class="settings-row-detail">${state.user.name}, ${state.user.sex === 'F' ? 'female' : 'male'}, ${state.user.age}, ${Math.floor(state.user.heightInches/12)}'${state.user.heightInches%12}"</div></div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Activity level</div><div class="settings-row-detail">If you log exercise daily, set to Sedentary.</div><select class="form-select" id="settings-activity" style="margin-top: 10px; max-width: 320px;">${ACTIVITY_LEVELS.map(a => `<option value="${a.id}" ${(state.user.activityLevel || 'light') === a.id ? 'selected' : ''}>${a.name} — ${a.detail}</option>`).join('')}</select></div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Tracker accuracy</div><div class="settings-row-detail">Most fitness trackers overestimate. Apply a haircut.</div><div style="display: flex; gap: 12px; align-items: center; margin-top: 14px;"><input type="range" id="settings-tracker-acc" min="30" max="100" step="5" value="${accPct}" style="flex: 1;" /><div style="font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--primary-dark); min-width: 60px; text-align: right;" id="settings-tracker-acc-val">${accPct}%</div></div>${suggested != null && Math.abs(suggested - acc) > 0.05 ? `<div style="margin-top: 12px; padding: 12px 14px; background: var(--accent-soft); border-radius: 8px; font-size: 12.5px; color: var(--warning-text);">Suggested: <strong>${Math.round(suggested * 100)}%</strong> would match reality. <button class="btn btn-sm btn-primary" id="apply-suggested-acc" style="margin-left: 8px; padding: 4px 12px; font-size: 11px;">Apply</button></div>` : ''}</div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Goal weight</div><div class="settings-row-detail">Currently ${state.user.goalWeight} lb.</div><div style="display: flex; gap: 8px; margin-top: 10px;"><input type="number" class="form-input" id="settings-goal" value="${state.user.goalWeight}" min="50" max="500" step="0.5" style="max-width: 140px;" /><button class="btn btn-secondary btn-sm" id="settings-save-goal">Update</button></div></div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Target loss rate</div><div class="settings-row-detail">0 = maintenance.</div><div style="display: flex; gap: 12px; align-items: center; margin-top: 14px;"><input type="range" id="settings-rate" min="0" max="200" step="25" value="${ratePct}" style="flex: 1;" /><div style="font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--primary-dark); min-width: 130px; text-align: right;" id="settings-rate-val">${rate.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span></div></div></div></div>
       <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Saved meals</div><div class="settings-row-detail">${(state.savedMeals && state.savedMeals.length) ? `${state.savedMeals.length} saved.` : 'None yet. When you parse a meal, click "★ Save as meal" to save it for one-tap re-logging.'}</div>${(state.savedMeals && state.savedMeals.length) ? `<div class="saved-meals-manage">${state.savedMeals.map(m => { const total = m.items.reduce((s,x)=>s+(parseInt(x.calories)||0),0); return `<div class="saved-meal-row"><div class="saved-meal-row-info"><div class="saved-meal-row-name">${escapeAttr(m.name)} <span class="saved-meal-row-cal">${total} cal</span></div><div class="saved-meal-row-detail">${escapeAttr(m.items.map(i => i.name).join(', '))}</div></div><button class="btn btn-secondary btn-sm" data-delete-saved="${m.id}">Delete</button></div>`; }).join('')}</div>` : ''}</div></div>
@@ -3835,13 +3911,6 @@ function openSettings() {
   document.getElementById('start-fresh-btn').addEventListener('click', () => { if (!confirm('Clear all data and start fresh?')) return; closeModal(); startOnboarding(); });
   document.getElementById('import-seth-btn').addEventListener('click', () => { if (!confirm("Replace data with Seth's spreadsheet?")) return; importSethSpreadsheet(); });
   document.getElementById('settings-activity').addEventListener('change', (e) => { state.user.activityLevel = e.target.value; saveState(); toast(`Activity level updated`); });
-  const accSlider = document.getElementById('settings-tracker-acc');
-  if (accSlider) {
-    accSlider.addEventListener('input', (e) => { document.getElementById('settings-tracker-acc-val').textContent = e.target.value + '%'; });
-    accSlider.addEventListener('change', (e) => { state.user.trackerAccuracy = parseInt(e.target.value) / 100; saveState(); toast(`Tracker accuracy: ${e.target.value}%`); });
-  }
-  const applyBtn = document.getElementById('apply-suggested-acc');
-  if (applyBtn) applyBtn.addEventListener('click', () => { const sug = getSuggestedTrackerAccuracy(state); if (sug == null) return; state.user.trackerAccuracy = sug; saveState(); closeModal(); toast(`Tracker accuracy: ${Math.round(sug * 100)}%`); navigate(currentView); });
   document.getElementById('export-json-btn').addEventListener('click', () => exportData('json'));
   document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
   const restoreBtn = document.getElementById('restore-backup-btn');
@@ -3989,7 +4058,7 @@ const TRACKER_SOURCES = [
 let obState = null;
 
 function defaultObState() {
-  return { step: 0, data: { name: '', startWeight: 190, goalWeight: 160, sex: 'F', age: 35, heightFt: 5, heightIn: 6, scalePref: 'smart', activityLevel: 'light', targetLossRate: 1.0, trackerSource: 'none', trackerAccuracy: 1.0 } };
+  return { step: 0, data: { name: '', startWeight: 190, goalWeight: 160, sex: 'F', age: 35, heightFt: 5, heightIn: 6, scalePref: 'smart', activityLevel: 'light', targetLossRate: 1.0, trackerAccuracy: 0.70, foodAccuracy: 0.85 } };
 }
 
 function startOnboarding() {
@@ -4041,9 +4110,8 @@ function renderObStep(stepName) {
       const rate = d.targetLossRate != null ? d.targetLossRate : 1.0;
       const ratePct = Math.round(rate * 100);
       const rateLabel = rate === 0 ? 'Maintenance' : rate < 0.6 ? 'Gentle' : rate < 1.2 ? 'Standard' : rate < 1.7 ? 'Aggressive' : 'Very aggressive';
-      return `<div class="ob-step left"><div class="ob-eyebrow">STEP 4 OF 5</div><div class="ob-h1">Your loss plan.</div><div class="ob-sub">How fast you want to lose, and what tracker (if any) reports your exercise burn.</div>
+      return `<div class="ob-step left"><div class="ob-eyebrow">STEP 4 OF 5</div><div class="ob-h1">Your loss plan.</div><div class="ob-sub">How fast you want to lose. You can adjust this anytime.</div>
         <div class="ob-field"><div class="ob-field-label">Target loss rate</div><div style="display: flex; gap: 12px; align-items: center; margin-top: 6px;"><input type="range" id="ob-rate" min="0" max="200" step="25" value="${ratePct}" style="flex: 1;" /><div style="font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--primary-dark); min-width: 130px; text-align: right;" id="ob-rate-val">${rate.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span></div></div><div style="margin-top: 8px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between;"><span>Maintenance</span><span style="color: var(--primary-dark); font-weight: 700;" id="ob-rate-label">${rateLabel}</span><span>2.0 lb/wk</span></div></div>
-        <div class="ob-field" style="margin-top: 12px;"><div class="ob-field-label">Fitness tracker</div><select class="ob-select" id="ob-tracker-source" style="font-size: 16px; padding: 4px 0;">${TRACKER_SOURCES.map(t => `<option value="${t.id}" ${(d.trackerSource || 'none') === t.id ? 'selected' : ''}>${t.name}${t.id !== 'none' ? ` — ~${Math.round(t.accuracy * 100)}% default` : ''}</option>`).join('')}</select></div>
         <div class="ob-buttons"><button class="ob-btn-secondary" id="ob-prev">Back</button><button class="ob-btn-primary" id="ob-next">Continue</button></div></div>`;
     case 'expectations':
       return `<div class="ob-step left"><div class="ob-eyebrow">STEP 5 OF 5 · WHAT TO EXPECT</div><div class="ob-h1">Calorie Correct works on weeks, not days.</div><div class="ob-sub">A few weeks before the math is meaningful.</div>
@@ -4098,7 +4166,6 @@ function wireObStep(stepName) {
     const lbl = document.getElementById('ob-rate-label');
     const labelFor = (r) => r === 0 ? 'Maintenance' : r < 0.6 ? 'Gentle' : r < 1.2 ? 'Standard' : r < 1.7 ? 'Aggressive' : 'Very aggressive';
     slider.addEventListener('input', (e) => { const r = parseInt(e.target.value) / 100; val.innerHTML = `${r.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span>`; lbl.textContent = labelFor(r); });
-    document.getElementById('ob-tracker-source').addEventListener('change', (e) => { obState.data.trackerSource = e.target.value; const found = TRACKER_SOURCES.find(t => t.id === e.target.value); obState.data.trackerAccuracy = found ? found.accuracy : 1.0; });
   }
   document.addEventListener('keydown', obKeyHandler);
 }
@@ -4132,12 +4199,6 @@ function obNext() {
   if (stepName === 'plan') {
     const sl = document.getElementById('ob-rate');
     if (sl) obState.data.targetLossRate = parseInt(sl.value) / 100;
-    const ts = document.getElementById('ob-tracker-source');
-    if (ts) {
-      obState.data.trackerSource = ts.value;
-      const found = TRACKER_SOURCES.find(t => t.id === ts.value);
-      obState.data.trackerAccuracy = found ? found.accuracy : 1.0;
-    }
   }
   if (obState.step < OB_STEPS.length - 1) { obState.step++; renderOnboarding(); }
 }
@@ -4161,7 +4222,7 @@ function completeOnboarding() {
   const d = obState.data;
   const today = formatDateISO(new Date());
   state = {
-    user: { name: d.name || 'You', sex: d.sex, age: d.age, heightInches: d.heightFt * 12 + d.heightIn, startWeight: d.startWeight, goalWeight: d.goalWeight, startDate: today, scalePref: d.scalePref, activityLevel: d.activityLevel || 'light', trackerAccuracy: d.trackerAccuracy != null ? d.trackerAccuracy : 1.0, targetLossRate: d.targetLossRate != null ? d.targetLossRate : 1.0, trackerSource: d.trackerSource || 'none' },
+    user: { name: d.name || 'You', sex: d.sex, age: d.age, heightInches: d.heightFt * 12 + d.heightIn, startWeight: d.startWeight, goalWeight: d.goalWeight, startDate: today, scalePref: d.scalePref, activityLevel: d.activityLevel || 'light', trackerAccuracy: d.trackerAccuracy != null ? d.trackerAccuracy : 0.70, foodAccuracy: d.foodAccuracy != null ? d.foodAccuracy : 0.85, targetLossRate: d.targetLossRate != null ? d.targetLossRate : 1.0 },
     weights: [{ date: today, weight: d.startWeight }],
     meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [], onboarded: true, isDemo: false,
   };
