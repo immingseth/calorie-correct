@@ -1436,12 +1436,27 @@ html, body {
 .chat-input-card {
   margin-bottom: 0;
 }
+/* Scrollable chat history above the input. Caps at ~50vh so the input always
+   stays in view; auto-scrolls to bottom on new turns (handled in JS). */
+.chat-history {
+  max-height: 420px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.chat-history::-webkit-scrollbar { width: 6px; }
+.chat-history::-webkit-scrollbar-track { background: transparent; }
+.chat-history::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.chat-history::-webkit-scrollbar-thumb:hover { background: var(--border-soft); }
 .chat-turn {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 12px;
 }
+.chat-turn:last-child { margin-bottom: 0; }
 .chat-turn-user,
 .chat-turn-coach {
   border-radius: var(--radius-sm);
@@ -1492,6 +1507,32 @@ html, body {
 .chat-turn-text strong {
   color: var(--primary-dark, #446957);
   font-weight: 700;
+}
+
+/* Typing indicator — three pulsing dots while Coach is generating a response.
+   Sits inside the coach bubble in place of the response text. */
+.chat-turn-pending {
+  background: var(--primary-softer, #F2F6F3);
+}
+.chat-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+.chat-typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary, #769B6C);
+  opacity: 0.4;
+  animation: chat-typing-pulse 1.2s infinite ease-in-out;
+}
+.chat-typing-dot:nth-child(2) { animation-delay: 0.18s; }
+.chat-typing-dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes chat-typing-pulse {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
 }
 
 /* Greeting-only Coach turn (proactive daily greeting, no user message above).
@@ -1584,6 +1625,7 @@ html, body {
   .chat-hint { font-size: 12px; }
   .chat-turn-coach.chat-turn-greeting { padding: 12px 14px; }
   .chat-turn-coach.chat-turn-greeting .chat-turn-text { font-size: 15px; }
+  .chat-history { max-height: 320px; }
 }
 @media (max-width: 380px) {
   /* Very narrow phones — give input as much room as possible */

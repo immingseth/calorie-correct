@@ -511,7 +511,7 @@ function restoreFromBackup() {
   try {
     state = migrateState(JSON.parse(backup));
     localStorage.setItem(STORAGE_KEY, backup);
-    setLastTurn(null);
+    clearChatHistory();
     return true;
   } catch (e) {
     return false;
@@ -545,7 +545,7 @@ function saveState() {
 function resetToDemoData() {
   state = generateDemoData();
   saveState();
-  setLastTurn(null);
+  clearChatHistory();
 }
 
 function resetToBlank(profile) {
@@ -1656,38 +1656,65 @@ const ICON = {
    =================================================== */
 let currentView = 'diary';
 
-/* Coach chat state — persists for the session, resets on page reload.
- * lastTurn holds the most-recent user input and coach response, displayed
- * as a single-turn chat bubble above the input on Diary and Results. */
-let lastTurn = null; // { user: string, coach: string, kind: 'log' | 'coach' | 'error', greeting?: bool }
-let chatRefocusOnNextRender = false; // set true after a submit/chip click so focus returns to the input
+/* Coach chat history — array of turns within the current day. Each turn is
+ * { id, user, coach, kind, greeting?, pending? }. BACKLOG locks in
+ * "within a day" persistence: on a new day, history clears.
+ * Persisted to localStorage; restored on init. When Claude API lands, the
+ * same array becomes the conversation context window. */
+let chatHistory = [];
+let chatRefocusOnNextRender = false; // set true after submit/chip click so focus returns
 
-/* Persistence helpers for the Coach chat surface.
- * lastTurn lives in its own localStorage key (separate from app state) because
- * it's transient UX state, not user data. Loaded on init so the bubble survives
- * page reloads. Pattern is intentionally extensible — when Claude API is wired
- * up, this becomes the foundation for full conversation history. */
-function loadLastTurn() {
+/* Persistence — chat history lives in its own localStorage key (separate from
+ * app state) because it's transient UX state. Stored as { date, turns } so we
+ * can drop yesterday's history on first load of a new day. When Claude API is
+ * wired up, the same array becomes the conversation context window. */
+function loadChatHistory() {
   try {
     const raw = localStorage.getItem(STORAGE_CHAT_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    if (!raw) return [];
+    const obj = JSON.parse(raw);
+    // Backward-compat: old single-turn format
+    if (obj && obj.user !== undefined && !obj.turns) {
+      return [obj];
+    }
+    if (!obj || !obj.turns) return [];
+    if (obj.date !== todayISO()) return []; // new day — drop yesterday's chat
+    return obj.turns;
   } catch (e) {
-    return null;
+    return [];
   }
 }
-function saveLastTurn() {
+function saveChatHistory() {
   try {
-    if (lastTurn) {
-      localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(lastTurn));
-    } else {
+    if (chatHistory.length === 0) {
       localStorage.removeItem(STORAGE_CHAT_KEY);
+    } else {
+      localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify({ date: todayISO(), turns: chatHistory }));
     }
   } catch (e) { /* localStorage full or disabled — fail silently */ }
 }
-function setLastTurn(turn) {
-  lastTurn = turn;
-  saveLastTurn();
+function addChatTurn(turn) {
+  // Assign a stable id so we can later resolve a pending turn
+  turn.id = turn.id || Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  chatHistory.push(turn);
+  saveChatHistory();
+  return turn.id;
+}
+function resolveChatTurn(id, coach, kind) {
+  const idx = chatHistory.findIndex(t => t.id === id);
+  if (idx < 0) return;
+  chatHistory[idx].coach = coach;
+  chatHistory[idx].kind = kind || chatHistory[idx].kind;
+  chatHistory[idx].pending = false;
+  saveChatHistory();
+}
+function clearChatHistory() {
+  chatHistory = [];
+  saveChatHistory();
+}
+/* Most recent turn — used by tests + helpers that look at the latest exchange */
+function lastChatTurn() {
+  return chatHistory.length ? chatHistory[chatHistory.length - 1] : null;
 }
 /* Diary view's currently-shown date. Persists across navigation within a session
  * but resets to today on page reload. Use getSelectedDate() to read it (lazy
@@ -1923,10 +1950,23 @@ function coachLogResponse(meal, dayDate) {
   return `${opener} ${status}`;
 }
 
-/* Build a proactive Coach greeting using the daily briefing data.
- * Returns a single HTML string (used as lastTurn.coach text). */
+/* Build a proactive Coach greeting. For brand-new users (fewer than 4 weights
+ * logged), returns a welcoming Day-1 message with what to do, instead of the
+ * analytical "how you're doing" recap. For returning users, uses the standard
+ * daily briefing data. */
 function coachDailyGreeting(s) {
   const b = generateDailyBriefing(s);
+  const weightCount = (s.weights || []).length;
+  const mealCount = (s.meals || []).length;
+
+  // Day 1 / very-new user: welcome + what-to-do, not analysis
+  if (weightCount <= 1 && mealCount === 0) {
+    return `${b.greeting} Welcome to Calorie Correct. Tell me what you ate — "turkey sandwich and an apple" — or weigh in to start your trend. Once you've logged a few days I'll start showing you how your real numbers compare to what your logs say.`;
+  }
+  if (weightCount < 4) {
+    return `${b.greeting} You're a few days in. Keep logging meals and weighing in — once we have about a week of data I'll be able to read your trend and start calibrating the math to your body.`;
+  }
+
   const target = getDailyTarget(s);
   const consumed = getDailyCalories(s, todayISO());
   const remaining = target - consumed;
@@ -1947,14 +1987,14 @@ function coachDailyGreeting(s) {
   return parts.join(' ');
 }
 
-/* Set lastTurn to a Coach greeting once per calendar day.
+/* Add a proactive Coach greeting as the first turn of the day.
  * Persists state.user.lastGreetingDate so the greeting only fires once per day,
- * even across page reloads. Skips if a turn is already in flight. */
+ * even across page reloads. Skips if any turn already exists today. */
 function seedDailyGreetingIfNeeded() {
   const today = todayISO();
   if (state.user.lastGreetingDate === today) return;
-  if (lastTurn) return; // user already started a conversation
-  setLastTurn({
+  if (chatHistory.length > 0) return; // user already has a conversation today
+  addChatTurn({
     user: '',
     coach: coachDailyGreeting(state),
     kind: 'coach',
@@ -1987,21 +2027,26 @@ function renderChatStrip(opts) {
   const big = !!(opts && opts.big);
   const recent = (opts && opts.showChips !== false) ? getRecentFoods(state, 5) : [];
   const hintText = "Try: \"turkey sandwich and an apple\", \"how am I doing this week?\", or \"why did I gain 2 lbs?\"";
+  const turnsHtml = chatHistory.map(t => {
+    const userBubble = (t.greeting || !t.user) ? '' : `
+      <div class="chat-turn-user">
+        <span class="chat-turn-label">You</span>
+        <span class="chat-turn-text">${escapeAttr(t.user)}</span>
+      </div>`;
+    const coachContent = t.pending
+      ? `<span class="chat-typing"><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span><span class="chat-typing-dot"></span></span>`
+      : t.coach;
+    const coachBubble = `
+      <div class="chat-turn-coach chat-turn-${t.kind || 'coach'}${t.greeting ? ' chat-turn-greeting' : ''}${t.pending ? ' chat-turn-pending' : ''}">
+        <span class="chat-turn-label">Coach</span>
+        <span class="chat-turn-text">${coachContent}</span>
+      </div>`;
+    return `<div class="chat-turn">${userBubble}${coachBubble}</div>`;
+  }).join('');
+
   return `
     <div class="chat-strip${big ? ' chat-strip-big' : ''}">
-      ${lastTurn ? `
-        <div class="chat-turn">
-          ${lastTurn.greeting || !lastTurn.user ? '' : `
-          <div class="chat-turn-user">
-            <span class="chat-turn-label">You</span>
-            <span class="chat-turn-text">${escapeAttr(lastTurn.user)}</span>
-          </div>`}
-          <div class="chat-turn-coach chat-turn-${lastTurn.kind}${lastTurn.greeting ? ' chat-turn-greeting' : ''}">
-            <span class="chat-turn-label">Coach</span>
-            <span class="chat-turn-text">${lastTurn.coach}</span>
-          </div>
-        </div>
-      ` : ''}
+      ${turnsHtml ? `<div class="chat-history" id="chat-history">${turnsHtml}</div>` : ''}
 
       <div class="home-input-card chat-input-card">
         <div class="home-input-wrap">
@@ -2038,45 +2083,57 @@ function wireChatStrip() {
   const submit = () => {
     const text = inp.value.trim();
     if (!text) return;
-    const items = parseMealText(text);
-    // Detect whether parser found a real food match (vs. a generic estimate placeholder)
-    const hasMatch = items.some(it => it.source === 'matched');
 
-    if (hasMatch) {
-      // Treat as meal log
-      const now = new Date();
-      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
-      const meal = {
-        id: Date.now(),
-        date: getSelectedDate(),
-        time,
-        mealType: guessMealType(now.getHours()),
-        raw: text,
-        items,
-        totalCal,
-        source: 'ai',
-      };
-      state.meals.push(meal);
-      recordAction({ type: 'create-meal', meal });
-      saveState();
-      setLastTurn({
-        user: text,
-        coach: coachLogResponse(meal, getSelectedDate()),
-        kind: 'log',
-      });
-    } else {
-      // Treat as a question / coaching input
-      setLastTurn({
-        user: text,
-        coach: coachQuestionResponse(text),
-        kind: 'coach',
-      });
+    // Push the user message immediately with a pending Coach bubble so the
+    // typing indicator shows. After ~400ms we resolve to the actual response.
+    // (When Claude API lands, replace the setTimeout with a real fetch — same shape.)
+    let turnId;
+    try {
+      turnId = addChatTurn({ user: text, coach: '', kind: 'coach', pending: true });
+    } catch (e) {
+      // Should never happen, but surface as an error bubble if it does
+      turnId = addChatTurn({ user: text, coach: 'Something went wrong. Try again?', kind: 'error', pending: false });
+      inp.value = '';
+      chatRefocusOnNextRender = true;
+      navigate(currentView);
+      return;
     }
 
     inp.value = '';
     chatRefocusOnNextRender = true;
     navigate(currentView);
+
+    // Async response — typing delay then resolution
+    setTimeout(() => {
+      try {
+        const items = parseMealText(text);
+        const hasMatch = items.some(it => it.source === 'matched');
+        if (hasMatch) {
+          const now = new Date();
+          const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+          const meal = {
+            id: Date.now(),
+            date: getSelectedDate(),
+            time,
+            mealType: guessMealType(now.getHours()),
+            raw: text,
+            items,
+            totalCal,
+            source: 'ai',
+          };
+          state.meals.push(meal);
+          recordAction({ type: 'create-meal', meal });
+          saveState();
+          resolveChatTurn(turnId, coachLogResponse(meal, getSelectedDate()), 'log');
+        } else {
+          resolveChatTurn(turnId, coachQuestionResponse(text), 'coach');
+        }
+      } catch (e) {
+        resolveChatTurn(turnId, "Sorry — something went wrong on my end. Try again in a moment?", 'error');
+      }
+      navigate(currentView);
+    }, 420);
   };
 
   sendBtn.addEventListener('click', submit);
@@ -2089,6 +2146,10 @@ function wireChatStrip() {
     // setTimeout ensures focus happens after the DOM is fully painted
     setTimeout(() => { inp.focus(); }, 0);
   }
+
+  // Auto-scroll the chat history to the bottom so the latest turn is in view.
+  const histEl = document.getElementById('chat-history');
+  if (histEl) histEl.scrollTop = histEl.scrollHeight;
 
   document.querySelectorAll('.home-chip[data-recent-idx]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2112,13 +2173,13 @@ function wireChatStrip() {
       state.meals.push(meal);
       recordAction({ type: 'create-meal', meal });
       saveState();
-      setLastTurn({
-        user: food.name,
-        coach: coachLogResponse(meal, getSelectedDate()),
-        kind: 'log',
-      });
+      const turnId = addChatTurn({ user: food.name, coach: '', kind: 'log', pending: true });
       chatRefocusOnNextRender = true;
       navigate(currentView);
+      setTimeout(() => {
+        resolveChatTurn(turnId, coachLogResponse(meal, getSelectedDate()), 'log');
+        navigate(currentView);
+      }, 320);
     });
   });
 }
@@ -2193,155 +2254,6 @@ VIEW_RENDERERS.diary = function (c) {
   c.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
   c.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
   c.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
-};
-
-/* ===================================================
-   VIEW: TODAY
-   =================================================== */
-let todayLogTab = 'describe';
-let todayParseDraft = null;
-
-VIEW_RENDERERS.today = function (c) {
-  const date = getSelectedDate();
-  const today = todayISO();
-  const isToday = date === today;
-  const isFuture = date > today;
-  const target = getDailyTarget(state);
-  const consumed = getDailyCalories(state, date);
-  const remaining = target - consumed;
-  const pct = Math.max(0, Math.min(1, consumed / target));
-  const currentW = getCurrentWeight(state);
-  const startW = state.user.startWeight;
-  const totalLoss = startW - currentW;
-  const cal = getCalibration(state);
-  const rate7 = get7dRate(state);
-  const progress = getGoalProgress(state);
-  const rateStat = rateStatus(rate7);
-  const dayBurnRaw = getDailyExerciseBurn(state, date);
-  const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
-  const dayBurnAdj = Math.round(dayBurnRaw * trackerAcc);
-  const dayNet = consumed - dayBurnAdj;
-  const netVsTarget = dayNet - target;
-  const netStat = consumed === 0 ? '' : netVsTarget <= 0 ? 'good' : netVsTarget < 200 ? 'warn' : 'bad';
-  const circumference = 2 * Math.PI * 90;
-  const entries = getDayEntries(state, date);
-  const macros = getDailyMacros(state, date);
-  const waterTotal = getDailyWater(state, date);
-
-  // Greeting only when viewing today (otherwise the date nav is enough)
-  const greeting = (() => {
-    if (!isToday) return '';
-    const h = new Date().getHours();
-    if (h < 12) return `Good morning, ${state.user.name}.`;
-    if (h < 18) return `Good afternoon, ${state.user.name}.`;
-    return `Good evening, ${state.user.name}.`;
-  })();
-
-  c.innerHTML = `
-    <div class="view-header">
-      <div class="diary-nav">
-        <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
-        <div class="diary-nav-center">
-          <div class="diary-nav-label">${getSelectedDateLabel()}</div>
-          <div class="diary-nav-date">${formatHumanDate(date)}</div>
-        </div>
-        <button class="diary-nav-btn" id="diary-next" title="Next day" ${isToday && isFuture ? '' : ''}>›</button>
-        <button class="diary-nav-btn diary-nav-cal" id="diary-cal" title="Pick a date">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        </button>
-        <input type="date" id="diary-cal-input" class="diary-cal-input" value="${date}" />
-        ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
-      </div>
-      ${greeting ? `<div class="view-title diary-greeting">${greeting}</div>` : ''}
-    </div>
-    <div class="stat-row">
-      <div class="stat-card dark">
-        <div class="stat-label">Current Weight</div>
-        <div class="stat-value">${currentW.toFixed(1)}<span class="unit">lb</span></div>
-        <div class="stat-detail">${state.weights.length > 1 ? formatHumanDate(state.weights[state.weights.length - 1].date) : 'starting line'}</div>
-      </div>
-      <div class="stat-card ${totalLoss > 0 ? 'good' : ''}">
-        <div class="stat-label">Total Change</div>
-        <div class="stat-value">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)}<span class="unit">lb</span></div>
-        <div class="stat-detail">${state.weights.length > 1 ? `over ${daysBetween(state.weights[0].date, state.weights[state.weights.length - 1].date)} days` : 'no data yet'}</div>
-      </div>
-      <div class="stat-card ${rateStat}">
-        <div class="stat-label">7-Day Rate</div>
-        <div class="stat-value">${rate7 == null ? '—' : (rate7 >= 0 ? '−' : '+') + Math.abs(rate7).toFixed(2)}<span class="unit">lb/wk</span></div>
-        <div class="stat-detail">${rate7 == null ? 'need 4+ weight entries' : 'target: 0.5–2 lb/wk loss'}</div>
-      </div>
-      <div class="stat-card ${netStat}">
-        <div class="stat-label">Net ${isToday ? 'Today' : 'This Day'}</div>
-        <div class="stat-value">${consumed === 0 ? '—' : dayNet.toLocaleString()}<span class="unit">cal</span></div>
-        <div class="stat-detail">${consumed === 0 ? (isToday ? 'no intake logged yet' : 'nothing logged this day') : dayBurnAdj > 0 ? `${consumed.toLocaleString()} in − ${dayBurnAdj.toLocaleString()} burned · target ${target.toLocaleString()}` : `target ${target.toLocaleString()}${isToday ? ' · log activity to see net' : ''}`}</div>
-      </div>
-    </div>
-    ${renderProgressCard(progress)}
-    ${isToday ? renderPlateauBanner(state) : ''}
-    <div class="diary-grid">
-      <div class="diary-side">
-        <div class="ring-card">
-          <div class="ring-svg-wrap">
-            <svg class="ring-svg" viewBox="0 0 200 200">
-              <circle class="ring-bg" cx="100" cy="100" r="90"/>
-              <circle class="ring-fg" cx="100" cy="100" r="90" stroke-dasharray="${circumference}" stroke-dashoffset="${circumference * (1 - pct)}"/>
-            </svg>
-            <div class="ring-center">
-              <div class="ring-num">${remaining > 0 ? remaining.toLocaleString() : 0}</div>
-              <div class="ring-label">${remaining >= 0 ? 'CAL LEFT' : 'OVER BY ' + Math.abs(remaining)}</div>
-            </div>
-          </div>
-          <div class="ring-budget"><strong>${consumed.toLocaleString()}</strong> of <strong>${target.toLocaleString()}</strong> logged ${isToday ? 'today' : 'this day'}</div>
-          <div class="ring-target-meta">Target ${cal.ready ? 'calibrated to your trend' : 'using starting estimate'}</div>
-          ${dayBurnRaw > 0 ? `<div class="ring-exercise-line">+${dayBurnRaw} cal burned · ${getExercisesForDate(state, date).length} ${getExercisesForDate(state, date).length === 1 ? 'activity' : 'activities'}${trackerAcc < 1.0 ? ` · ${dayBurnAdj} after ${Math.round(trackerAcc * 100)}% haircut` : ''}</div>` : ''}
-        </div>
-      </div>
-      <div class="diary-main">
-        <div class="card diary-card">
-          <div class="diary-header">
-            <div class="section-h" style="margin: 0;">Diary${!isToday ? ` · ${getSelectedDateLabel().toLowerCase()}` : ''}</div>
-            <div class="diary-count">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</div>
-          </div>
-          <div class="diary-stream">
-            ${entries.length ? entries.map(renderDiaryEntry).join('') : '<div class="diary-empty">Nothing logged for this day yet.</div>'}
-          </div>
-          ${renderDailyTotalsBlock(consumed, dayBurnAdj, dayNet, target, macros, waterTotal)}
-          ${renderTodayLogger()}
-          ${renderWaterQuickAdd()}
-          <div class="diary-add-row">
-            <button class="btn btn-secondary btn-sm" id="add-exercise-shortcut">+ Log activity</button>
-            <button class="btn btn-secondary btn-sm" id="add-water-shortcut">+ Water</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
-
-  // Wire date navigation
-  document.getElementById('diary-prev').addEventListener('click', () => { shiftSelectedDate(-1); navigate(currentView); });
-  document.getElementById('diary-next').addEventListener('click', () => { shiftSelectedDate(1); navigate(currentView); });
-  const calBtn = document.getElementById('diary-cal');
-  const calInput = document.getElementById('diary-cal-input');
-  if (calBtn && calInput) {
-    calBtn.addEventListener('click', () => calInput.showPicker ? calInput.showPicker() : calInput.click());
-    calInput.addEventListener('change', (e) => { if (e.target.value) { setSelectedDate(e.target.value); navigate(currentView); } });
-  }
-  const todayBtn = document.getElementById('diary-today');
-  if (todayBtn) todayBtn.addEventListener('click', () => { setSelectedDate(todayISO()); navigate(currentView); });
-
-  // Wire entry edit handlers
-  c.querySelectorAll('[data-meal-id]').forEach(el => el.addEventListener('click', () => openMealEdit(parseInt(el.dataset.mealId))));
-  c.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
-  c.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
-  c.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
-
-  // Wire add buttons
-  const addEx = document.getElementById('add-exercise-shortcut');
-  if (addEx) addEx.addEventListener('click', () => openExerciseAdd());
-  const addWat = document.getElementById('add-water-shortcut');
-  if (addWat) addWat.addEventListener('click', () => openWaterAdd());
-
-  wireTodayLogger();
-  wireWaterQuickAdd();
 };
 
 /* Add a water entry to the selected date. Used by the quick-add chips. */
@@ -3275,72 +3187,6 @@ function renderProgressChart(s, cal, range) {
 let trendChart = null, caloriesBarChart = null, exerciseBarChart = null;
 let trendRange = 90, weightLogShowAll = false;
 
-VIEW_RENDERERS.trend = function (c) {
-  const cal = getCalibration(state);
-  const startW = state.user.startWeight;
-  const currentW = getCurrentWeight(state);
-  const totalLoss = startW - currentW;
-  const days = state.weights.length > 1 ? daysBetween(state.weights[0].date, state.weights[state.weights.length - 1].date) : 0;
-  const progress = getGoalProgress(state);
-
-  c.innerHTML = `
-    <div class="view-header">
-      <div class="view-eyebrow">YOUR TREND</div>
-      <div class="trend-headline">
-        <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
-        <div class="trend-bignum-label">since you started, ${days} days ago</div>
-      </div>
-    </div>
-    ${renderProgressCard(progress)}
-    ${renderPlateauBanner(state)}
-    <div class="chart-card">
-      <div class="date-range-row">
-        <div class="bar-chart-legend">
-          <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
-          <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
-          <span><span class="swatch" style="background:var(--accent)"></span>Predicted from logging</span>
-          <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
-        </div>
-        <div class="date-range-tabs" id="trend-range-tabs">
-          <button class="date-range-tab ${trendRange === 7 ? 'active' : ''}" data-range="7">7D</button>
-          <button class="date-range-tab ${trendRange === 30 ? 'active' : ''}" data-range="30">30D</button>
-          <button class="date-range-tab ${trendRange === 90 ? 'active' : ''}" data-range="90">90D</button>
-          <button class="date-range-tab ${trendRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
-        </div>
-      </div>
-      <div class="chart-canvas-wrap"><canvas id="trend-chart"></canvas></div>
-    </div>
-    ${renderCalorieBarCard(state)}
-    ${renderExerciseBarCard(state)}
-    ${cal.ready ? `
-      <div class="calibration-card">
-        <div class="calibration-eyebrow">CALIBRATION</div>
-        <div class="calibration-body">${renderCalibrationCopy(cal, currentW, totalLoss)}</div>
-        <div class="calibration-footer">Nothing to fix. We just calibrate every Sunday. <a href="#" id="methodology-link" style="color: var(--primary); font-style: normal; text-decoration: underline; font-weight: 600;">How this is calculated →</a></div>
-      </div>
-      <div class="tdee-row">
-        <div class="tdee-stat"><div class="num">${(totalLoss / Math.max(1, days/7)).toFixed(2)}</div><div class="lbl">Avg loss / wk (lb)</div></div>
-        <div class="tdee-stat"><div class="num">${cal.realTDEE.toLocaleString()}</div><div class="lbl">Real TDEE${cal.exerciseTracked ? ' · with exercise' : ''}</div></div>
-        <div class="tdee-stat"><div class="num">${cal.dailyTarget.toLocaleString()}</div><div class="lbl">Daily target</div></div>
-        <div class="tdee-stat"><div class="num">${cal.trackingAccuracy != null ? Math.round(cal.trackingAccuracy * 100) + '%' : '—'}</div><div class="lbl">Tracking accuracy</div></div>
-      </div>
-    ` : `<div class="calibration-card"><div class="calibration-eyebrow">CALIBRATION · BUILDING DATA</div><div class="calibration-body">We need at least 7 days of weight + meal data to start calibrating. Keep logging.</div></div>`}
-    ${renderWeightLogCard(state)}`;
-
-  c.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { trendRange = parseInt(e.currentTarget.dataset.range); navigate(currentView); }));
-  c.querySelectorAll('[data-weight-date]').forEach(row => row.addEventListener('click', () => openDayDetail(row.dataset.weightDate)));
-  const methLink = document.getElementById('methodology-link');
-  if (methLink) methLink.addEventListener('click', (e) => { e.preventDefault(); navigate('methodology'); });
-  const toggleBtn = document.getElementById('weight-log-toggle');
-  if (toggleBtn) toggleBtn.addEventListener('click', () => { weightLogShowAll = !weightLogShowAll; navigate(currentView); });
-
-  setTimeout(() => {
-    renderTrendChart(state, cal, trendRange);
-    renderCalorieBarChart(state, getAdherenceMetrics(state), trendRange);
-    renderExerciseBarChart(state, trendRange);
-  }, 10);
-};
-
 function renderCalibrationCopy(cal, currentW, actualLoss) {
   const predictedLoss = Math.max(0, cal.predictedLoss);
   const ex = cal.exerciseTracked;
@@ -3516,28 +3362,6 @@ function renderWeightLogCard(s) {
   </div>`;
 }
 
-/* ===================================================
-   VIEW: INSIGHTS
-   =================================================== */
-VIEW_RENDERERS.insights = function (c) {
-  const insight = generateWeeklyInsight(state);
-  const adherence = getAdherenceMetrics(state);
-  c.innerHTML = `
-    <div class="view-header">
-      <div class="view-eyebrow">INSIGHTS · WEEKLY · ${insight.dateRange}</div>
-      <div class="view-title">${insight.title}</div>
-      <div class="view-sub">${insight.thin ? 'Building your weekly view — log a few more days.' : 'Generated Sunday morning. Reading time: about a minute.'}</div>
-    </div>
-    <div class="insight-card-lg">
-      <div class="insight-prose">${insight.body}</div>
-      ${!insight.thin ? `<div class="insight-divider"></div><div class="insight-stat-row"><div class="tdee-stat"><div class="num">${insight.stats.weightDelta >= 0 ? '+' : '−'}${Math.abs(insight.stats.weightDelta).toFixed(1)}</div><div class="lbl">Weight Δ (lb)</div></div><div class="tdee-stat"><div class="num">${insight.stats.avgCal.toLocaleString()}</div><div class="lbl">Avg cal/day</div></div><div class="tdee-stat"><div class="num">${insight.stats.daysLogged}/7</div><div class="lbl">Days logged</div></div></div>` : ''}
-    </div>
-    ${adherence ? renderAdherenceCards(adherence) : ''}
-    ${renderComparePeriodsCard(state)}
-    ${renderWeekdayPatternCard(state)}
-    <div class="insight-archive"><div class="section-h">Earlier weeks</div>${renderInsightArchive(state)}</div>`;
-};
-
 function renderAdherenceCards(a) {
   if (!a || a.totalLogged < 5) {
     return `<div class="bar-chart-card" style="text-align: center;"><div class="bar-chart-title">Adherence snapshot</div><div style="font-size: 13px; color: var(--muted); margin-top: 12px;">${(!a || a.totalLogged === 0) ? 'No intake logged in the last 14 days yet.' : `${a.totalLogged} of 14 days logged.`} We'll show adherence stats once you've logged at least 5 days.</div></div>`;
@@ -3614,20 +3438,6 @@ function renderInsightArchive(s) {
 /* ===================================================
    VIEW: COACH (placeholder until backend)
    =================================================== */
-VIEW_RENDERERS.coach = function (c) {
-  c.innerHTML = `
-    <div class="view-header">
-      <div class="view-eyebrow">COACH</div>
-      <div class="view-title">Ask anything.</div>
-      <div class="view-sub">Plain talk about weight loss, plateaus, social events, restaurants, the math behind your numbers.</div>
-    </div>
-    <div class="insight-card-lg" style="text-align: center; padding: 56px 40px;">
-      <div style="width: 72px; height: 72px; background: var(--primary-soft); color: var(--primary-dark); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 30px; font-weight: 700; margin-bottom: 24px;">CC</div>
-      <div style="font-family: var(--serif); font-size: 28px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; margin-bottom: 14px;">Coach is coming online soon.</div>
-      <div style="font-size: 15px; color: var(--muted); line-height: 1.6; max-width: 480px; margin: 0 auto 24px;">The coach will be powered by Claude — the same AI that built this app — and will know your data, your trend, your calibration, and your goal.</div>
-      <div style="font-size: 13.5px; color: var(--muted); line-height: 1.6; max-width: 460px; margin: 0 auto; font-style: italic;">Coming with the backend phase. For now, your weekly Sunday Insight on the Insights tab covers most of what a coach would tell you.</div>
-    </div>`;
-};
 
 /* ===================================================
    MODALS
@@ -4050,7 +3860,7 @@ function importSethSpreadsheet() {
   saveState();
   document.getElementById('user-name').textContent = state.user.name;
   document.getElementById('user-avatar').textContent = state.user.name.charAt(0).toUpperCase();
-  setLastTurn(null);
+  clearChatHistory();
   closeModal();
   toast(`Imported ${newState.weights.length} weights, ${newState.meals.length} days intake, ${newState.exercises.length} days exercise.`);
   navigate('diary');
@@ -4242,7 +4052,7 @@ function completeOnboarding() {
     meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [], onboarded: true, isDemo: false,
   };
   saveState();
-  setLastTurn(null);
+  clearChatHistory();
   const overlay = document.getElementById('onboarding-overlay');
   if (overlay) overlay.remove();
   document.removeEventListener('keydown', obKeyHandler);
@@ -4257,7 +4067,7 @@ function completeOnboarding() {
    =================================================== */
 function init() {
   state = loadState();
-  lastTurn = loadLastTurn(); // restore Coach bubble across reloads
+  chatHistory = loadChatHistory(); // restore today's chat across reloads
   document.querySelectorAll('[data-view]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.view)));
   document.getElementById('weighin-btn').addEventListener('click', openWeighIn);
   document.getElementById('profile-btn').addEventListener('click', openSettings);
