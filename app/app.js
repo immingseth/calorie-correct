@@ -1809,6 +1809,9 @@ function toast(msg, opts) {
 
 function closeModal() {
   document.getElementById('modal-backdrop').classList.remove('open');
+  // Reset modal width modifier so the next modal that opens uses the default
+  const m = document.getElementById('modal');
+  if (m) m.className = 'modal';
 }
 
 /* ===================================================
@@ -3714,21 +3717,121 @@ function openSettings() {
   const bak = getBackupInfo();
   const rate = state.user.targetLossRate != null ? state.user.targetLossRate : 1.0;
   const ratePct = Math.round(rate * 100);
-  const exportNote = exp.never ? 'Never exported. Back up now.' : `Last export: ${exp.days} day${exp.days !== 1 ? 's' : ''} ago${exp.overdue ? ' — time to back up' : ''}`;
-  const exportColor = exp.never || exp.overdue ? 'var(--danger)' : 'var(--muted)';
-  modal.innerHTML = `<div class="modal-h">Settings</div><div class="modal-sub">${state.isDemo ? 'Currently using demo data.' : 'Using your own data.'}</div>
-    <div>
-      <div class="settings-row"><div><div class="settings-row-label">Reset to demo data</div><div class="settings-row-detail">Loads Average Joe's example.</div></div><button class="btn btn-secondary btn-sm" id="reset-demo-btn">Reset</button></div>
-      <div class="settings-row"><div><div class="settings-row-label">Start fresh</div><div class="settings-row-detail">Clears all data, runs onboarding.</div></div><button class="btn btn-secondary btn-sm" id="start-fresh-btn">Start fresh</button></div>
-      <div class="settings-row"><div><div class="settings-row-label">Import Seth's spreadsheet</div><div class="settings-row-detail">Loads 84 days of HEALTH data.</div></div><button class="btn btn-secondary btn-sm" id="import-seth-btn">Import</button></div>
-      <div class="settings-row"><div><div class="settings-row-label">User profile</div><div class="settings-row-detail">${state.user.name}, ${state.user.sex === 'F' ? 'female' : 'male'}, ${state.user.age}, ${Math.floor(state.user.heightInches/12)}'${state.user.heightInches%12}"</div></div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Activity level</div><div class="settings-row-detail">If you log exercise daily, set to Sedentary.</div><select class="form-select" id="settings-activity" style="margin-top: 10px; max-width: 320px;">${ACTIVITY_LEVELS.map(a => `<option value="${a.id}" ${(state.user.activityLevel || 'light') === a.id ? 'selected' : ''}>${a.name} — ${a.detail}</option>`).join('')}</select></div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Goal weight</div><div class="settings-row-detail">Currently ${state.user.goalWeight} lb.</div><div style="display: flex; gap: 8px; margin-top: 10px;"><input type="number" class="form-input" id="settings-goal" value="${state.user.goalWeight}" min="50" max="500" step="0.5" style="max-width: 140px;" /><button class="btn btn-secondary btn-sm" id="settings-save-goal">Update</button></div></div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Target loss rate</div><div class="settings-row-detail">0 = maintenance.</div><div style="display: flex; gap: 12px; align-items: center; margin-top: 14px;"><input type="range" id="settings-rate" min="0" max="200" step="25" value="${ratePct}" style="flex: 1;" /><div style="font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--primary-dark); min-width: 130px; text-align: right;" id="settings-rate-val">${rate.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span></div></div></div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Saved meals</div><div class="settings-row-detail">${(state.savedMeals && state.savedMeals.length) ? `${state.savedMeals.length} saved.` : 'None yet. When you parse a meal, click "★ Save as meal" to save it for one-tap re-logging.'}</div>${(state.savedMeals && state.savedMeals.length) ? `<div class="saved-meals-manage">${state.savedMeals.map(m => { const total = m.items.reduce((s,x)=>s+(parseInt(x.calories)||0),0); return `<div class="saved-meal-row"><div class="saved-meal-row-info"><div class="saved-meal-row-name">${escapeAttr(m.name)} <span class="saved-meal-row-cal">${total} cal</span></div><div class="saved-meal-row-detail">${escapeAttr(m.items.map(i => i.name).join(', '))}</div></div><button class="btn btn-secondary btn-sm" data-delete-saved="${m.id}">Delete</button></div>`; }).join('')}</div>` : ''}</div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Export your data</div><div class="settings-row-detail">JSON keeps everything; CSV for spreadsheets.</div><div style="font-size: 12px; color: ${exportColor}; font-weight: 700; margin-top: 8px;">${exportNote}</div><div style="display: flex; gap: 8px; margin-top: 10px;"><button class="btn btn-secondary btn-sm" id="export-json-btn">Export JSON</button><button class="btn btn-secondary btn-sm" id="export-csv-btn">Export CSV</button></div></div></div>
-      <div class="settings-row"><div style="flex:1;"><div class="settings-row-label">Restore from auto-backup</div><div class="settings-row-detail">${bak ? `Auto-backup last saved ${bak}.` : 'No auto-backup yet.'}</div><button class="btn btn-secondary btn-sm" id="restore-backup-btn" style="margin-top: 10px;" ${!bak ? 'disabled' : ''}>Restore</button></div></div>
+  const rateLabel = rate === 0 ? 'Maintenance' : rate < 0.6 ? 'Gentle' : rate < 1.2 ? 'Standard' : rate < 1.7 ? 'Aggressive' : 'Very aggressive';
+  const exportNote = exp.never ? 'Never exported.' : `Last export: ${exp.days} day${exp.days !== 1 ? 's' : ''} ago`;
+  const exportClass = exp.never || exp.overdue ? 'settings-meta-warn' : '';
+  const heightFt = Math.floor(state.user.heightInches / 12);
+  const heightIn = state.user.heightInches % 12;
+  const sexText = state.user.sex === 'F' ? 'female' : 'male';
+  const savedMeals = state.savedMeals || [];
+
+  modal.className = 'modal modal-wide';
+  modal.innerHTML = `<div class="modal-h">Settings</div>
+    <div class="modal-sub">${state.isDemo ? 'Currently using demo data.' : 'Using your own data.'}</div>
+
+    <div class="settings-section">
+      <div class="settings-section-eyebrow">Profile</div>
+
+      <div class="settings-item-static">
+        <div class="settings-item-label">${escapeAttr(state.user.name)}</div>
+        <div class="settings-item-meta">${sexText} · ${state.user.age} · ${heightFt}'${heightIn}"</div>
+      </div>
+
+      <div class="settings-item">
+        <div class="settings-item-label">Activity level</div>
+        <select class="settings-select" id="settings-activity">${ACTIVITY_LEVELS.map(a => `<option value="${a.id}" ${(state.user.activityLevel || 'light') === a.id ? 'selected' : ''}>${a.name}</option>`).join('')}</select>
+      </div>
+
+      <div class="settings-item">
+        <div class="settings-item-label">Goal weight</div>
+        <div class="settings-item-control-group">
+          <input type="number" class="settings-input" id="settings-goal" value="${state.user.goalWeight}" min="50" max="500" step="0.5" />
+          <span class="settings-item-unit">lb</span>
+          <button class="btn btn-secondary btn-sm" id="settings-save-goal">Update</button>
+        </div>
+      </div>
+
+      <div class="settings-item-stack">
+        <div class="settings-item-head">
+          <div class="settings-item-label">Target loss rate</div>
+          <div class="settings-item-value" id="settings-rate-val">${rate.toFixed(2)}<span class="settings-item-unit">lb/wk</span></div>
+        </div>
+        <input type="range" class="settings-slider" id="settings-rate" min="0" max="200" step="25" value="${ratePct}" />
+        <div class="settings-item-anchors">
+          <span>Maintenance</span>
+          <span class="settings-item-anchor-active" id="settings-rate-label">${rateLabel}</span>
+          <span>2.0 lb/wk</span>
+        </div>
+      </div>
     </div>
+
+    <div class="settings-section">
+      <div class="settings-section-eyebrow">Your data</div>
+
+      ${savedMeals.length ? `
+        <div class="settings-item-stack">
+          <div class="settings-item-label">Saved meals · ${savedMeals.length}</div>
+          <div class="settings-saved-list">${savedMeals.map(m => {
+            const total = m.items.reduce((s,x)=>s+(parseInt(x.calories)||0),0);
+            return `<div class="settings-saved-row">
+              <div class="settings-saved-info">
+                <div class="settings-saved-name">${escapeAttr(m.name)} <span class="settings-saved-cal">${total} cal</span></div>
+                <div class="settings-saved-detail">${escapeAttr(m.items.map(i => i.name).join(', '))}</div>
+              </div>
+              <button class="settings-saved-delete" data-delete-saved="${m.id}" title="Delete">×</button>
+            </div>`;
+          }).join('')}</div>
+        </div>
+      ` : ''}
+
+      <div class="settings-item-stack">
+        <div class="settings-item-head">
+          <div class="settings-item-label">Export your data</div>
+          <div class="settings-item-meta ${exportClass}">${exportNote}</div>
+        </div>
+        <div class="settings-action-row">
+          <button class="btn btn-secondary btn-sm" id="export-json-btn">JSON</button>
+          <button class="btn btn-secondary btn-sm" id="export-csv-btn">CSV</button>
+        </div>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">Restore from auto-backup</div>
+          <div class="settings-item-detail">${bak ? `Last backup: ${bak}.` : 'No auto-backup yet.'}</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="restore-backup-btn" ${!bak ? 'disabled' : ''}>Restore</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-eyebrow">Reset</div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">Reset to demo data</div>
+          <div class="settings-item-detail">Loads Average Joe's example.</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="reset-demo-btn">Reset</button>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">Start fresh</div>
+          <div class="settings-item-detail">Clears all data, runs onboarding.</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="start-fresh-btn">Start fresh</button>
+      </div>
+
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">Import Seth's data</div>
+          <div class="settings-item-detail">84 days of HEALTH spreadsheet.</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="import-seth-btn">Import</button>
+      </div>
+    </div>
+
     <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Close</button></div>`;
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
@@ -3742,7 +3845,13 @@ function openSettings() {
   if (restoreBtn) restoreBtn.addEventListener('click', () => { if (!confirm('Restore from auto-backup?')) return; if (restoreFromBackup()) { closeModal(); toast('Restored from backup'); navigate('diary'); } else toast('No backup found'); });
   const rateSlider = document.getElementById('settings-rate');
   if (rateSlider) {
-    rateSlider.addEventListener('input', (e) => { const r = parseInt(e.target.value) / 100; document.getElementById('settings-rate-val').innerHTML = `${r.toFixed(2)} <span style="font-size: 12px; color: var(--muted); font-family: var(--sans); font-weight: 600;">lb/wk</span>`; });
+    const rateLabelFor = (r) => r === 0 ? 'Maintenance' : r < 0.6 ? 'Gentle' : r < 1.2 ? 'Standard' : r < 1.7 ? 'Aggressive' : 'Very aggressive';
+    rateSlider.addEventListener('input', (e) => {
+      const r = parseInt(e.target.value) / 100;
+      document.getElementById('settings-rate-val').innerHTML = `${r.toFixed(2)}<span class="settings-item-unit">lb/wk</span>`;
+      const lbl = document.getElementById('settings-rate-label');
+      if (lbl) lbl.textContent = rateLabelFor(r);
+    });
     rateSlider.addEventListener('change', (e) => { state.user.targetLossRate = parseInt(e.target.value) / 100; saveState(); toast(`Target rate: ${state.user.targetLossRate.toFixed(2)} lb/wk`); });
   }
   document.getElementById('settings-save-goal').addEventListener('click', () => { const v = parseFloat(document.getElementById('settings-goal').value); if (isNaN(v) || v < 50 || v > 500) return toast('Goal weight 50-500 lb'); state.user.goalWeight = v; saveState(); closeModal(); toast(`Goal weight: ${v} lb`); navigate(currentView); });
