@@ -858,18 +858,20 @@ function getDailyWater(s, date) {
  * { protein, carbs, fat } in grams, summed across items that have those fields. */
 function getDailyMacros(s, date) {
   const meals = getMealsForDate(s, date);
-  let protein = 0, carbs = 0, fat = 0;
+  let protein = 0, carbs = 0, fat = 0, fiber = 0;
   for (const m of meals) {
     for (const item of (m.items || [])) {
       if (item.protein_g != null) protein += parseFloat(item.protein_g) || 0;
       if (item.carbs_g != null) carbs += parseFloat(item.carbs_g) || 0;
       if (item.fat_g != null) fat += parseFloat(item.fat_g) || 0;
+      if (item.fiber_g != null) fiber += parseFloat(item.fiber_g) || 0;
     }
   }
   return {
     protein: Math.round(protein),
     carbs: Math.round(carbs),
     fat: Math.round(fat),
+    fiber: Math.round(fiber),
   };
 }
 
@@ -2414,20 +2416,81 @@ function renderDiaryEntry(entry) {
 /* Daily totals block — shown at the bottom of the diary stream.
  * Calories in / burned / net / target, plus macros + water totals. */
 function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) {
-  const hasMacros = macros.protein > 0 || macros.carbs > 0 || macros.fat > 0;
-  return `<div class="diary-totals">
-    <div class="diary-totals-row">
-      <div class="diary-totals-cell"><div class="diary-totals-label">Total in</div><div class="diary-totals-value">${consumed.toLocaleString()}</div></div>
-      <div class="diary-totals-cell"><div class="diary-totals-label">Burned</div><div class="diary-totals-value">${burned.toLocaleString()}</div></div>
-      <div class="diary-totals-cell"><div class="diary-totals-label">Net</div><div class="diary-totals-value">${consumed === 0 ? '—' : net.toLocaleString()}</div></div>
-      <div class="diary-totals-cell"><div class="diary-totals-label">Target</div><div class="diary-totals-value diary-totals-muted">${target.toLocaleString()}</div></div>
+  const hasIntake = consumed > 0;
+  const remaining = target - consumed;
+  const remainingLabel = remaining >= 0 ? 'Remaining' : 'Over target';
+  const remainingValue = Math.abs(remaining);
+  const proteinCal = macros.protein * 4;
+  const carbCal = macros.carbs * 4;
+  const fatCal = macros.fat * 9;
+  const macroCalTotal = proteinCal + carbCal + fatCal;
+  const hasMacros = macroCalTotal > 0;
+  const proteinPct = hasMacros ? Math.round((proteinCal / macroCalTotal) * 100) : 0;
+  const carbPct = hasMacros ? Math.round((carbCal / macroCalTotal) * 100) : 0;
+  const fatPct = hasMacros ? 100 - proteinPct - carbPct : 0;
+  const fiber = (macros.fiber != null) ? macros.fiber : 0;
+
+  return `<div class="today-panel">
+    <div class="today-panel-head">
+      <span class="today-panel-eyebrow">Today</span>
     </div>
-    <div class="diary-totals-row diary-totals-row-macros">
-      <div class="diary-totals-cell"><div class="diary-totals-label">Protein</div><div class="diary-totals-value-sm">${hasMacros ? macros.protein + ' g' : '—'}</div></div>
-      <div class="diary-totals-cell"><div class="diary-totals-label">Carbs</div><div class="diary-totals-value-sm">${hasMacros ? macros.carbs + ' g' : '—'}</div></div>
-      <div class="diary-totals-cell"><div class="diary-totals-label">Fat</div><div class="diary-totals-value-sm">${hasMacros ? macros.fat + ' g' : '—'}</div></div>
-      <div class="diary-totals-cell"><div class="diary-totals-label">Water</div><div class="diary-totals-value-sm">${waterOz > 0 ? waterOz + ' oz' : '—'}</div></div>
+
+    <div class="today-headline">
+      <div class="today-headline-cell">
+        <div class="today-bignum">${hasIntake ? consumed.toLocaleString() : '—'}</div>
+        <div class="today-bignum-label">Calories in</div>
+      </div>
+      <div class="today-headline-divider"></div>
+      <div class="today-headline-cell">
+        <div class="today-bignum ${remaining < 0 ? 'today-bignum-over' : 'today-bignum-accent'}">${hasIntake ? remainingValue.toLocaleString() : target.toLocaleString()}</div>
+        <div class="today-bignum-label">${hasIntake ? remainingLabel : 'Daily target'}</div>
+      </div>
     </div>
+
+    ${hasMacros ? `
+    <div class="today-macro-bar-wrap">
+      <div class="today-macro-bar">
+        <div class="today-macro-bar-seg today-macro-bar-protein" style="width:${proteinPct}%"></div>
+        <div class="today-macro-bar-seg today-macro-bar-carbs" style="width:${carbPct}%"></div>
+        <div class="today-macro-bar-seg today-macro-bar-fat" style="width:${fatPct}%"></div>
+      </div>
+      <div class="today-macro-legend">
+        <span><span class="today-macro-dot today-macro-dot-protein"></span>Protein ${proteinPct}%</span>
+        <span><span class="today-macro-dot today-macro-dot-carbs"></span>Carbs ${carbPct}%</span>
+        <span><span class="today-macro-dot today-macro-dot-fat"></span>Fat ${fatPct}%</span>
+      </div>
+    </div>
+    ` : ''}
+
+    <div class="today-metrics">
+      <div class="today-metric">
+        <div class="today-metric-label">Protein</div>
+        <div class="today-metric-value">${hasMacros ? macros.protein : '—'}<span class="today-metric-unit">${hasMacros ? 'g' : ''}</span></div>
+      </div>
+      <div class="today-metric">
+        <div class="today-metric-label">Carbs</div>
+        <div class="today-metric-value">${hasMacros ? macros.carbs : '—'}<span class="today-metric-unit">${hasMacros ? 'g' : ''}</span></div>
+      </div>
+      <div class="today-metric">
+        <div class="today-metric-label">Fat</div>
+        <div class="today-metric-value">${hasMacros ? macros.fat : '—'}<span class="today-metric-unit">${hasMacros ? 'g' : ''}</span></div>
+      </div>
+      <div class="today-metric">
+        <div class="today-metric-label">Fiber</div>
+        <div class="today-metric-value">${fiber > 0 ? fiber : '—'}<span class="today-metric-unit">${fiber > 0 ? 'g' : ''}</span></div>
+      </div>
+      <div class="today-metric">
+        <div class="today-metric-label">Water</div>
+        <div class="today-metric-value">${waterOz > 0 ? waterOz : '—'}<span class="today-metric-unit">${waterOz > 0 ? 'oz' : ''}</span></div>
+      </div>
+    </div>
+
+    ${hasIntake || burned > 0 ? `
+    <div class="today-footer">
+      <span class="today-footer-burn">${burned > 0 ? '−' + burned.toLocaleString() + ' burned' : 'No exercise logged'}</span>
+      <span class="today-footer-net">net ${hasIntake ? net.toLocaleString() : '0'} cal</span>
+    </div>
+    ` : ''}
   </div>`;
 }
 
