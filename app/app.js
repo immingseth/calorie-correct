@@ -2919,16 +2919,11 @@ VIEW_RENDERERS.results = function (c) {
           <div class="calibration-body">We need at least 7 days of weight + meal data to start calibrating. Keep logging.</div>
         </div>`
     }
-
-    ${renderWeightLogCard(state)}
   `;
 
   c.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); navigate(currentView); }));
-  c.querySelectorAll('[data-weight-date]').forEach(row => row.addEventListener('click', () => openDayDetail(row.dataset.weightDate)));
   const methLink = document.getElementById('methodology-link');
   if (methLink) methLink.addEventListener('click', (e) => { e.preventDefault(); navigate('methodology'); });
-  const toggleBtn = document.getElementById('weight-log-toggle');
-  if (toggleBtn) toggleBtn.addEventListener('click', () => { weightLogShowAll = !weightLogShowAll; navigate(currentView); });
 
   // Wire the chat strip (input + Coach response)
   wireChatStrip();
