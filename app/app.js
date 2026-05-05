@@ -1082,6 +1082,29 @@ function getCalibration(s) {
   };
 }
 
+/* Compute the user-facing logging accuracy %.
+ * Returns { value, status, days } where status is 'observed' (from weight trend
+ * after calibration is ready) or 'estimated' (from tracker × food multipliers
+ * before enough data accrues). Designed so foodAccuracy slots in cleanly when
+ * we add it — for now foodAccuracy defaults to 1.0 if not present. */
+function getOverallAccuracy(s) {
+  const trackerAcc = s.user.trackerAccuracy != null ? s.user.trackerAccuracy : 1.0;
+  const foodAcc = s.user.foodAccuracy != null ? s.user.foodAccuracy : 1.0;
+  const cal = getCalibration(s);
+  if (cal.ready && cal.trackingAccuracy != null) {
+    return {
+      value: Math.round(cal.trackingAccuracy * 100),
+      status: 'observed',
+      days: cal.days,
+    };
+  }
+  return {
+    value: Math.round(trackerAcc * foodAcc * 100),
+    status: 'estimated',
+    days: 0,
+  };
+}
+
 function smoothedRecentWeight(s) {
   // 7-day trailing average to reduce daily noise
   const recent = s.weights.slice(-7);
@@ -2108,7 +2131,7 @@ VIEW_RENDERERS.diary = function (c) {
 
     <div class="card home-diary-card diary-card-quiet">
       <div class="diary-header">
-        <div class="section-h" style="margin: 0;">${isToday ? "Today's diary" : `Diary · ${getSelectedDateLabel().toLowerCase()}`}</div>
+        <div class="section-h" style="margin: 0;">${isToday ? "Today's log" : `Log · ${getSelectedDateLabel().toLowerCase()}`}</div>
         <div class="diary-count">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
       </div>
       <div class="diary-stream">
@@ -2547,6 +2570,42 @@ function renderProgressCard(progress) {
       ${targetProj ? `<br><strong>Target pace</strong> · ${targetRate.toFixed(2)} lb/wk → <span class="proj-emph">${targetProj.dateStr}</span> (${targetProj.weeks} wk)` : targetRate === 0 ? `<br><strong>Target pace</strong> · maintenance mode (no deficit)` : ''}
       ${gapMsg ? `<br><em style="color: var(--muted);">${gapMsg}</em>` : ''}
     </div>`}
+  </div>`;
+}
+
+/* Logging accuracy display — sits below the progress card on Results.
+ * Shows one headline number (the overall accuracy %), a status pill
+ * indicating whether it's estimated or observed, and a single line of
+ * brand-voice copy explaining what the number means. */
+function renderAccuracyCard(s) {
+  const acc = getOverallAccuracy(s);
+  const trackerSourceName = (function () {
+    const id = s.user.trackerSource || 'none';
+    const t = TRACKER_SOURCES.find(x => x.id === id);
+    return t && id !== 'none' ? t.name : null;
+  })();
+  let copy;
+  if (acc.status === 'observed') {
+    if (acc.value >= 90) {
+      copy = `Tight match between your logs and your scale. The math barely needs to adjust.`;
+    } else if (acc.value >= 70) {
+      copy = `About <strong>${100 - acc.value}%</strong> of the deficit your logs claim isn't reaching reality — typical gap. The math compensates automatically.`;
+    } else if (acc.value >= 40) {
+      copy = `<strong>${100 - acc.value}%</strong> of your logged deficit isn't reaching reality. Could be unlogged bites, restaurant guesses, or tracker overcount. None of it requires action — calibration absorbs it.`;
+    } else {
+      copy = `Your scale and your logs are far apart right now. We'll keep recalibrating; no need to log differently.`;
+    }
+  } else {
+    const sourceClause = trackerSourceName ? `your ${trackerSourceName}` : 'your tracker setup';
+    copy = `Estimate based on ${sourceClause}. We'll switch to your actual weight trend after about 14 days of logging.`;
+  }
+  return `<div class="accuracy-card">
+    <div class="accuracy-head">
+      <span class="accuracy-eyebrow">Logging accuracy</span>
+      <span class="accuracy-status accuracy-status-${acc.status}">${acc.status === 'observed' ? `Observed · ${acc.days} days` : 'Estimated'}</span>
+    </div>
+    <div class="accuracy-number">${acc.value}<span class="accuracy-pct">%</span></div>
+    <div class="accuracy-copy">${copy}</div>
   </div>`;
 }
 
@@ -3006,6 +3065,8 @@ VIEW_RENDERERS.results = function (c) {
     </div>
 
     ${renderProgressCard(progress)}
+
+    ${renderAccuracyCard(state)}
 
     <div class="chart-card">
       <div class="date-range-row">

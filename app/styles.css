@@ -2723,6 +2723,81 @@ html, body {
   padding: 22px 24px 20px;
   margin-bottom: 24px;
 }
+
+/* ===========================================================
+   Logging accuracy card — sits below the progress bar on Results.
+   Headline % + status pill (Estimated / Observed) + brand voice copy.
+   =========================================================== */
+.accuracy-card {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 22px 24px 20px;
+  margin-bottom: 24px;
+}
+.accuracy-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 12px;
+}
+.accuracy-eyebrow {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.accuracy-status {
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.accuracy-status-observed {
+  background: var(--primary-softer);
+  color: var(--primary-dark);
+  border: 0.5px solid var(--primary-light);
+}
+.accuracy-status-estimated {
+  background: var(--bg-soft);
+  color: var(--muted);
+  border: 0.5px solid var(--border-soft);
+}
+.accuracy-number {
+  font-size: 48px;
+  font-weight: 500;
+  color: var(--primary-dark);
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.accuracy-pct {
+  font-size: 22px;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+.accuracy-copy {
+  font-size: 13.5px;
+  color: var(--text-soft);
+  line-height: 1.55;
+  margin-top: 14px;
+  max-width: 540px;
+}
+.accuracy-copy strong {
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+@media (max-width: 700px) {
+  .accuracy-card { padding: 18px 20px 16px; }
+  .accuracy-number { font-size: 38px; }
+  .accuracy-pct { font-size: 18px; }
+}
 .progress-header {
   display: flex;
   justify-content: space-between;
