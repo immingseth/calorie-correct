@@ -1683,7 +1683,9 @@ function loadChatHistory() {
     }
     if (!obj || !obj.turns) return [];
     if (obj.date !== todayISO()) return []; // new day — drop yesterday's chat
-    return obj.turns;
+    // Drop any pending turns left over from a closed/crashed session.
+    // The greeting will retry on next load if its lastGreetingDate is still stale.
+    return obj.turns.filter(t => !t.pending);
   } catch (e) {
     return [];
   }
@@ -1952,11 +1954,13 @@ function coachLogResponse(meal, dayDate) {
   return `${opener} ${status}`;
 }
 
-/* Build a proactive Coach greeting. For brand-new users (fewer than 4 weights
- * logged), returns a welcoming Day-1 message with what to do, instead of the
- * analytical "how you're doing" recap. For returning users, uses the standard
- * daily briefing data. */
-function coachDailyGreeting(s) {
+/* Local fallback for the daily greeting — used when the Worker is unreachable
+ * or before a Claude greeting is available. Same shape/voice as Claude
+ * generates, but template-driven instead of contextual.
+ *
+ * For brand-new users (fewer than 4 weights logged), returns a welcoming
+ * Day-1 message. For returning users, uses the standard briefing data. */
+function coachDailyGreetingLocal(s) {
   const b = generateDailyBriefing(s);
   const weightCount = (s.weights || []).length;
   const mealCount = (s.meals || []).length;
@@ -1989,21 +1993,62 @@ function coachDailyGreeting(s) {
   return parts.join(' ');
 }
 
+/* Async — call the Worker to generate today's greeting via Claude.
+ * Returns greeting text or null on failure. */
+async function coachDailyGreetingRemote(s) {
+  if (!WORKER_URL) return null;
+  try {
+    const h = new Date().getHours();
+    const timeOfDay = h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
+    const response = await fetch(WORKER_URL + '/api/greeting', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userContext: buildUserContext(s),
+        timeOfDay,
+      }),
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (!data.greeting) throw new Error('Empty greeting');
+    return data.greeting;
+  } catch (e) {
+    return null;
+  }
+}
+
 /* Add a proactive Coach greeting as the first turn of the day.
- * Persists state.user.lastGreetingDate so the greeting only fires once per day,
- * even across page reloads. Skips if any turn already exists today. */
+ * Adds a pending bubble immediately (typing indicator), then async-resolves
+ * with Claude's greeting. Falls back to the local template if the Worker
+ * is unreachable. Persists state.user.lastGreetingDate so the greeting only
+ * fires once per day. Skips if any turn already exists today. */
 function seedDailyGreetingIfNeeded() {
   const today = todayISO();
   if (state.user.lastGreetingDate === today) return;
   if (chatHistory.length > 0) return; // user already has a conversation today
-  addChatTurn({
+
+  // Add the pending bubble synchronously so the user sees Coach "typing"
+  const turnId = addChatTurn({
     user: '',
-    coach: coachDailyGreeting(state),
+    coach: '',
     kind: 'coach',
     greeting: true,
+    pending: true,
   });
+
+  // Mark the day immediately so we don't double-fire if the user reloads quickly.
+  // If the API call fails, we still don't retry today — the local template will
+  // resolve the pending bubble below, and tomorrow's greeting fires normally.
   state.user.lastGreetingDate = today;
   saveState();
+
+  // Async resolve — call Worker, fall back to local template on any failure
+  (async () => {
+    const remote = await coachDailyGreetingRemote(state);
+    const text = remote || coachDailyGreetingLocal(state);
+    resolveChatTurn(turnId, text, 'coach');
+    navigate(currentView);
+  })();
 }
 
 /* Build a compact user-context snapshot the Worker passes to Claude in the

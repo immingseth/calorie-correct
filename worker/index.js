@@ -159,6 +159,80 @@ export default {
       return jsonResponse({ ok: true, model: MODEL }, 200, cors);
     }
 
+    // Daily greeting — fires once per day on first app open. Brand-aligned
+    // morning briefing based on the user's actual data. Returns plain text.
+    if (url.pathname === '/api/greeting' && request.method === 'POST') {
+      let body;
+      try { body = await request.json(); }
+      catch (e) { return jsonResponse({ error: 'Invalid JSON' }, 400, cors); }
+
+      const userContext = body.userContext || {};
+      const timeOfDay = body.timeOfDay || 'morning'; // optional client hint
+
+      const greetingSystem = `You are Coach inside Calorie Correct. The user just opened the app for the first time today — write them a brief greeting.
+
+Voice & guardrails (same as always):
+- Matter-of-fact, brand-aligned, no pep talks. Treat the user like a smart adult.
+- The scale is the ground truth. Calibration is automatic; never tell the user to log more carefully.
+- No medical advice. Behavioral coaching only.
+
+Greeting structure (weave naturally — don't bullet-list, don't headline-stack):
+- Open with time-of-day + first name: "Good ${timeOfDay}, [name]."
+- Lead on ONE thread that matters most based on their data:
+  * trending down at a healthy rate (0.5-2.0 lb/wk): name the rate, brief affirmation
+  * flat / stair-step trend: normalize it, note plateaus happen in steps
+  * trending up: address without alarm (water/sodium/hormones), no panic
+  * fresh user (<7 days data or no rate yet): welcoming, "we'll have a real trend soon"
+- If yesterday was logged, optionally include a single line about how it landed (under/over/on-target).
+- If consistency is high (80%+ days logged), optionally a brief callout.
+- Optionally one practical orientation — usually "keep doing what you're doing" or "log lunch when you get there."
+
+Output rules:
+- 2-4 sentences total. Tight. No bullets. No hedging filler.
+- Return ONLY the greeting text. No JSON, no quotes around it, no preamble.
+- Use plain language. No emoji unless the user has used emoji.
+- You can use <strong> for one or two emphasis moments (a key number) — sparingly.`;
+
+      const userMessage = `Generate today's greeting based on this user context:\n${JSON.stringify(userContext, null, 2)}`;
+
+      let anthropicResponse;
+      try {
+        anthropicResponse = await fetch(ANTHROPIC_API_URL, {
+          method: 'POST',
+          headers: {
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            max_tokens: 250,
+            system: greetingSystem,
+            messages: [{ role: 'user', content: userMessage }],
+          }),
+        });
+      } catch (e) {
+        return jsonResponse({ error: 'Network error' }, 502, cors);
+      }
+
+      if (!anthropicResponse.ok) {
+        const text = await anthropicResponse.text();
+        return jsonResponse(
+          { error: 'Anthropic API error', status: anthropicResponse.status, detail: text },
+          502, cors
+        );
+      }
+
+      const data = await anthropicResponse.json();
+      const greeting = (data.content || [])
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('')
+        .trim();
+
+      return jsonResponse({ greeting, usage: data.usage || null }, 200, cors);
+    }
+
     if (url.pathname === '/api/coach' && request.method === 'POST') {
       let body;
       try { body = await request.json(); }
