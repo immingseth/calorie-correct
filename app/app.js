@@ -567,6 +567,25 @@ function wireChatCollapseToggle() {
   });
 }
 
+/* Chat history toggle — by default we only show the most recent turn so the
+ * conversation doesn't dominate the view. The user can expand to see the
+ * full session's history. Preference persists across reloads.
+ *
+ * Distinct from the chat-strip collapse above (which hides the whole strip
+ * behind the FAB on mobile). This one only collapses the *history*; the
+ * input + most recent reply are always visible. */
+const STORAGE_CHAT_HISTORY_KEY = 'realcal_chat_history_expanded';
+
+function isChatHistoryExpanded() {
+  try {
+    return localStorage.getItem(STORAGE_CHAT_HISTORY_KEY) === '1';
+  } catch (e) { return false; }
+}
+function setChatHistoryExpanded(expanded) {
+  try { localStorage.setItem(STORAGE_CHAT_HISTORY_KEY, expanded ? '1' : '0'); } catch (e) {}
+  navigate(currentView);
+}
+
 /* PWA install prompt — fires a custom banner once the user has used the app
  * a bit, suggesting they install to home screen. Two paths:
  *  - Android Chrome (and similar): captures the beforeinstallprompt event
@@ -2527,7 +2546,15 @@ function renderChatStrip(opts) {
   const big = !!(opts && opts.big);
   const recent = (opts && opts.showChips !== false) ? getRecentFoods(state, 5) : [];
   const hintText = "Try: \"turkey sandwich and an apple\", \"how am I doing this week?\", or \"why did I gain 2 lbs?\"";
-  const turnsHtml = chatHistory.map(t => {
+  // History is collapsed by default — show only the last turn. If a turn is
+  // pending (Coach is thinking), keep it visible too. The user can expand to
+  // see the full session's history. Preference persists.
+  const expandedHistory = isChatHistoryExpanded();
+  const totalTurns = chatHistory.length;
+  const visibleTurns = expandedHistory ? chatHistory : chatHistory.slice(-1);
+  const hiddenCount = totalTurns - visibleTurns.length;
+
+  const renderTurn = (t) => {
     const userBubble = (t.greeting || !t.user) ? '' : `
       <div class="chat-turn-user">
         <span class="chat-turn-label">You</span>
@@ -2542,14 +2569,27 @@ function renderChatStrip(opts) {
         <span class="chat-turn-text">${coachContent}</span>
       </div>`;
     return `<div class="chat-turn">${userBubble}${coachBubble}</div>`;
-  }).join('');
+  };
+
+  const turnsHtml = visibleTurns.map(renderTurn).join('');
+
+  // Show toggle whenever there's more than one turn in the session, regardless
+  // of current expanded state — so collapsed users can expand, and expanded
+  // users can re-collapse.
+  const toggleHtml = totalTurns > 1
+    ? `<button class="chat-history-toggle" id="chat-history-toggle">
+        ${expandedHistory
+          ? `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg> Hide earlier messages`
+          : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg> Show ${hiddenCount} earlier message${hiddenCount === 1 ? '' : 's'}`}
+      </button>`
+    : '';
 
   return `
     <div class="chat-strip${big ? ' chat-strip-big' : ''}">
       <button class="chat-collapse-btn" id="chat-collapse-btn" aria-label="Close chat">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
       </button>
-      ${turnsHtml ? `<div class="chat-history" id="chat-history">${turnsHtml}</div>` : ''}
+      ${turnsHtml ? `<div class="chat-history" id="chat-history">${toggleHtml}${turnsHtml}</div>` : ''}
 
       <div class="home-input-card chat-input-card">
         <div class="home-input-wrap">
@@ -2807,6 +2847,10 @@ function wireChatStrip() {
 
   // Recipe chips + manage button live in the chat input card too.
   wireRecipesRow();
+
+  // Chat history toggle — show/hide all earlier turns
+  const histToggle = document.getElementById('chat-history-toggle');
+  if (histToggle) histToggle.addEventListener('click', () => setChatHistoryExpanded(!isChatHistoryExpanded()));
 
   const submit = () => {
     const text = inp.value.trim();
