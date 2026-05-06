@@ -4194,7 +4194,7 @@ input[type="range"]::-moz-range-thumb {
     padding: 12px 14px 0;
     overflow: hidden;
   }
-  body.mtab-coach [data-mobile-tab="coach"] {
+  body.mtab-coach #view-container > [data-mobile-tab="coach"] {
     flex: 1;
     min-height: 0;
     display: flex;
