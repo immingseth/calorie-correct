@@ -2286,6 +2286,88 @@ function seedDailyGreetingIfNeeded() {
 
 /* Build a compact user-context snapshot the Worker passes to Claude in the
  * system prompt. Keep it short — token cost grows fast otherwise. */
+/* Apply one Coach-issued edit or delete operation against state. Returns a
+ * descriptor of what happened ({kind, label}) for building the toast/reply,
+ * or null if the op was malformed or the target couldn't be found. Caller is
+ * responsible for saveState() afterwards.
+ *
+ * Supported ops:
+ *   { action: 'delete', target_type: 'meal'|'exercise', target_id }
+ *   { action: 'update', target_type: 'meal'|'exercise', target_id, changes: {...} }
+ *
+ * Coach is instructed to only emit ids that appear in today's userContext, so
+ * a missing target generally means the user already deleted/edited it from
+ * the UI between turns. We log a no-op rather than erroring. */
+function applyCoachOperation(op) {
+  if (!op || !op.action || !op.target_type || op.target_id == null) return null;
+  const id = op.target_id;
+  if (op.action === 'delete') {
+    if (op.target_type === 'meal') {
+      const meal = state.meals.find(m => m.id === id);
+      if (!meal) return null;
+      state.meals = state.meals.filter(m => m.id !== id);
+      recordAction({ type: 'delete-meal', meal });
+      const label = (meal.items && meal.items[0] && meal.items[0].name) || 'meal';
+      return { kind: 'delete-meal', label };
+    }
+    if (op.target_type === 'exercise') {
+      const ex = state.exercises.find(e => e.id === id);
+      if (!ex) return null;
+      state.exercises = state.exercises.filter(e => e.id !== id);
+      recordAction({ type: 'delete-exercise', exercise: ex });
+      return { kind: 'delete-exercise', label: ex.typeName || 'activity' };
+    }
+    return null;
+  }
+  if (op.action === 'update') {
+    const ch = op.changes || {};
+    if (op.target_type === 'meal') {
+      const idx = state.meals.findIndex(m => m.id === id);
+      if (idx < 0) return null;
+      const before = JSON.parse(JSON.stringify(state.meals[idx]));
+      const meal = state.meals[idx];
+      if (typeof ch.total_calories === 'number' && ch.total_calories >= 0) {
+        const newTotal = Math.round(ch.total_calories);
+        meal.totalCal = newTotal;
+        // For single-item meals, keep the item in sync with the new total.
+        // For multi-item, leave items alone — totalCal is the source of truth.
+        if (Array.isArray(meal.items) && meal.items.length === 1) {
+          meal.items[0].calories = newTotal;
+        }
+      }
+      if (typeof ch.time === 'string' && /^\d{1,2}:\d{2}$/.test(ch.time)) {
+        meal.time = ch.time.length === 4 ? '0' + ch.time : ch.time;
+      }
+      if (typeof ch.meal_type === 'string') meal.mealType = ch.meal_type;
+      recordAction({ type: 'edit-meal', meal, before });
+      return { kind: 'edit-meal', label: (meal.items && meal.items[0] && meal.items[0].name) || 'meal' };
+    }
+    if (op.target_type === 'exercise') {
+      const idx = state.exercises.findIndex(e => e.id === id);
+      if (idx < 0) return null;
+      const before = JSON.parse(JSON.stringify(state.exercises[idx]));
+      const ex = state.exercises[idx];
+      if (typeof ch.duration_min === 'number' && ch.duration_min >= 0) {
+        ex.duration = Math.round(ch.duration_min);
+      }
+      if (typeof ch.calories_burned === 'number' && ch.calories_burned >= 0) {
+        ex.caloriesBurned = Math.round(ch.calories_burned);
+      }
+      if (typeof ch.type === 'string') {
+        const t = getExerciseTypeById(ch.type);
+        ex.type = t.id;
+        ex.typeName = t.name;
+        ex.typeEmoji = t.emoji;
+      }
+      if (typeof ch.note === 'string') ex.note = ch.note;
+      recordAction({ type: 'edit-exercise', exercise: ex, before });
+      return { kind: 'edit-exercise', label: ex.typeName || 'activity' };
+    }
+    return null;
+  }
+  return null;
+}
+
 function buildUserContext(s) {
   const cal = getCalibration(s);
   const currentW = getCurrentWeight(s);
@@ -2294,6 +2376,33 @@ function buildUserContext(s) {
   const target = getDailyTarget(s);
   const today = todayISO();
   const todayIntake = getDailyCalories(s, today);
+
+  // Today's actual logged items, with IDs, so Coach can reference them by name
+  // and emit edit/delete operations targeting specific entries. This also
+  // means Coach sees the live truth, not just stale chat history.
+  const todayMeals = (s.meals || [])
+    .filter(m => m.date === today)
+    .map(m => ({
+      id: m.id,
+      time: m.time || '',
+      mealType: m.mealType || 'unknown',
+      description: (m.items && m.items.length)
+        ? m.items.map(i => i.name).filter(Boolean).join(', ').slice(0, 100)
+        : (m.raw || 'meal'),
+      totalCal: m.totalCal != null ? m.totalCal : (m.items || []).reduce((sum, x) => sum + (parseInt(x.calories) || 0), 0),
+    }));
+  const todayExercises = (s.exercises || [])
+    .filter(e => e.date === today)
+    .map(e => ({
+      id: e.id,
+      time: e.time || '',
+      type: e.type || 'other',
+      typeName: e.typeName || '',
+      duration: e.duration || 0,
+      caloriesBurned: e.caloriesBurned || 0,
+      note: e.note || '',
+    }));
+  const todayBurnCal = todayExercises.reduce((sum, x) => sum + (x.caloriesBurned || 0), 0);
 
   return {
     name: s.user.name,
@@ -2308,6 +2417,9 @@ function buildUserContext(s) {
     targetLossRateLbPerWk: s.user.targetLossRate,
     dailyTargetCal: target,
     todayIntakeCal: todayIntake,
+    todayBurnCal,
+    todayMeals,
+    todayExercises,
     daysOfData: (s.weights || []).length,
     calibrationReady: !!cal.ready,
     observedAccuracyPct: (cal.ready && cal.trackingAccuracy != null) ? Math.round(cal.trackingAccuracy * 100) : null,
@@ -2747,6 +2859,26 @@ function wireChatStrip() {
           state.exercises.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
           saveState();
           resolveChatTurn(turnId, remote.summary || `Logged ${created.length} activit${created.length === 1 ? 'y' : 'ies'}.`, 'log');
+        } else if (remote && (remote.intent === 'delete' || remote.intent === 'edit') && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
+          // Coach edit/delete — apply each operation against today's log and
+          // surface an undo toast so the user can roll back if Coach got it wrong.
+          const applied = [];
+          for (const op of remote.operations) {
+            const result = applyCoachOperation(op);
+            if (result) applied.push(result);
+          }
+          if (applied.length > 0) {
+            saveState();
+            // Single undo toast for the whole batch (lastAction reflects the most recent op).
+            const noun = applied.length === 1 ? applied[0].label : `${applied.length} entries`;
+            const verb = remote.intent === 'delete' ? 'Deleted' : 'Updated';
+            toast(`${verb} ${noun}`, { undo: true });
+            resolveChatTurn(turnId, remote.summary || `${verb} ${noun}.`, 'log');
+          } else {
+            // Coach proposed an op but no targets matched — probably stale ids.
+            // Show the summary so user knows what Coach thought it was doing.
+            resolveChatTurn(turnId, remote.summary || "I couldn't find that entry to change. It may have already been removed.", 'coach');
+          }
         } else if (remote && remote.summary) {
           // Question or ambiguous — show Claude's reply
           resolveChatTurn(turnId, remote.summary, 'coach');
