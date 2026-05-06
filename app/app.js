@@ -2059,11 +2059,11 @@ function stripHtml(s) {
   return String(s || '').replace(/<[^>]+>/g, '');
 }
 
-/* Async — call the Worker to get a real Claude response.
- * Falls back to the local canned response on any failure (network, timeout,
- * 5xx, etc.) so the chat keeps working offline / when API is down. */
-async function coachQuestionResponseRemote(text, excludeTurnId) {
-  if (!WORKER_URL) return coachQuestionResponse(text);
+/* Async — call the Worker for a structured Coach response.
+ * Returns { intent, confidence, summary, items } or null on failure.
+ * The caller decides what to do based on intent. */
+async function coachRespondRemote(text, excludeTurnId) {
+  if (!WORKER_URL) return null;
   try {
     const response = await fetch(WORKER_URL + '/api/coach', {
       method: 'POST',
@@ -2076,11 +2076,10 @@ async function coachQuestionResponseRemote(text, excludeTurnId) {
     });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     const data = await response.json();
-    if (!data.reply) throw new Error('Empty reply');
-    return data.reply;
+    if (!data || !data.intent) throw new Error('Bad response shape');
+    return data;
   } catch (e) {
-    // Fall through to local canned response
-    return coachQuestionResponse(text);
+    return null;
   }
 }
 
@@ -2182,17 +2181,29 @@ function wireChatStrip() {
     chatRefocusOnNextRender = true;
     navigate(currentView);
 
-    // Async response — meal logs use the local parser (still local for now;
-    // Phase 2C will move meal parsing to Claude). Questions go to the Worker.
+    // Always send to Claude; the Worker returns structured intent + items.
+    // For meal intent: create a meal entry with full macros from Claude.
+    // For question intent: just show the reply.
+    // If Worker fails, fall back to the local food-database parser as last resort.
     (async () => {
       try {
-        const items = parseMealText(text);
-        const hasMatch = items.some(it => it.source === 'matched');
-        if (hasMatch) {
-          // Local meal log path — fast, no API call needed
+        const remote = await coachRespondRemote(text, turnId);
+
+        if (remote && remote.intent === 'meal' && remote.confidence >= 0.6 && Array.isArray(remote.items) && remote.items.length > 0) {
+          // Meal log via Claude — items have macros + fiber
           const now = new Date();
           const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-          const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+          const items = remote.items.map(it => ({
+            name: it.name || 'item',
+            portion: it.portion || '',
+            calories: parseInt(it.calories) || 0,
+            protein_g: parseFloat(it.protein_g) || 0,
+            carbs_g: parseFloat(it.carbs_g) || 0,
+            fat_g: parseFloat(it.fat_g) || 0,
+            fiber_g: parseFloat(it.fiber_g) || 0,
+            source: 'claude',
+          }));
+          const totalCal = items.reduce((s, x) => s + x.calories, 0);
           const meal = {
             id: Date.now(),
             date: getSelectedDate(),
@@ -2201,18 +2212,41 @@ function wireChatStrip() {
             raw: text,
             items,
             totalCal,
-            source: 'ai',
+            source: 'claude',
           };
           state.meals.push(meal);
           recordAction({ type: 'create-meal', meal });
           saveState();
-          // Brief delay so the typing indicator is visible (otherwise feels instant/jarring)
-          await new Promise(r => setTimeout(r, 320));
-          resolveChatTurn(turnId, coachLogResponse(meal, getSelectedDate()), 'log');
+          // Use Claude's summary as Coach's reply (already brand-aligned)
+          resolveChatTurn(turnId, remote.summary || coachLogResponse(meal, getSelectedDate()), 'log');
+        } else if (remote && remote.summary) {
+          // Question or ambiguous — show Claude's reply
+          resolveChatTurn(turnId, remote.summary, 'coach');
         } else {
-          // Question path — call the Worker
-          const reply = await coachQuestionResponseRemote(text, turnId);
-          resolveChatTurn(turnId, reply, 'coach');
+          // Worker failed entirely — fall back to local parser
+          const items = parseMealText(text);
+          const hasMatch = items.some(it => it.source === 'matched');
+          if (hasMatch) {
+            const now = new Date();
+            const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+            const meal = {
+              id: Date.now(),
+              date: getSelectedDate(),
+              time,
+              mealType: guessMealType(now.getHours()),
+              raw: text,
+              items,
+              totalCal,
+              source: 'local',
+            };
+            state.meals.push(meal);
+            recordAction({ type: 'create-meal', meal });
+            saveState();
+            resolveChatTurn(turnId, coachLogResponse(meal, getSelectedDate()), 'log');
+          } else {
+            resolveChatTurn(turnId, coachQuestionResponse(text), 'coach');
+          }
         }
       } catch (e) {
         resolveChatTurn(turnId, "Sorry — something went wrong on my end. Try again in a moment?", 'error');
