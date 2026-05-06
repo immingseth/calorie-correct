@@ -4309,3 +4309,277 @@ input[type="range"]::-moz-range-thumb {
   .log-shell { padding: 20px 18px; }
   .log-textarea { font-size: 16px; padding: 16px 18px; }
 }
+
+/* CSV import modal — file picker, parse preview, mode selector */
+.csv-import-info {
+  background: var(--primary-soft, #EAF0EC);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 12px 0 14px;
+  font-size: 13px;
+  color: var(--text-soft, #4A4540);
+  line-height: 1.5;
+}
+.csv-import-info-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-dark, #446957);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+.csv-import-info-cols {
+  font-size: 14px;
+  color: var(--text, #1c2a23);
+  margin-bottom: 6px;
+}
+.csv-import-info-cols code {
+  background: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--primary-dark, #446957);
+}
+.csv-import-info-meta { font-size: 12px; color: var(--muted, #8A8278); margin-bottom: 10px; }
+.csv-import-info-meta code {
+  background: #fff;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.csv-template-link {
+  background: transparent;
+  color: var(--primary-dark, #446957);
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.csv-template-link:hover { color: var(--primary, #769B6C); }
+.csv-preview {
+  display: none;
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 12px;
+}
+.csv-preview-stats { font-size: 14px; color: var(--text, #1c2a23); }
+.csv-preview-stats strong { color: var(--primary-dark, #446957); }
+.csv-preview-meta { font-size: 12px; color: var(--muted, #8A8278); margin-top: 4px; }
+.csv-preview-error {
+  font-size: 14px;
+  color: #b54b3a;
+  background: #fcf0ed;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.csv-import-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+.csv-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.csv-mode-option:hover { border-color: var(--primary-light, #9DBA82); background: var(--primary-soft, #EAF0EC); }
+.csv-mode-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--primary-dark, #446957);
+  flex: 0 0 auto;
+}
+.csv-mode-title { font-size: 14px; font-weight: 600; color: var(--text, #1c2a23); margin-bottom: 2px; }
+.csv-mode-detail { font-size: 12px; color: var(--muted, #8A8278); line-height: 1.4; }
+
+/* Feedback modal — textarea + meta-toggle row */
+.feedback-textarea {
+  width: 100%;
+  min-height: 140px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text, #1c2a23);
+  background: #fff;
+  resize: vertical;
+  margin: 8px 0 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.feedback-textarea:focus {
+  outline: none;
+  border-color: var(--primary, #769B6C);
+  box-shadow: 0 0 0 3px rgba(118, 155, 108, 0.15);
+}
+.feedback-meta-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-soft, #4A4540);
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.feedback-meta-toggle input { accent-color: var(--primary-dark, #446957); }
+
+/* Settings → About: small inline link row for Privacy / Terms / Feedback */
+.settings-about-links {
+  font-size: 13px;
+  color: var(--muted, #8A8278);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  padding: 4px 0;
+}
+.settings-about-links a {
+  color: var(--primary-dark, #446957);
+  text-decoration: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+.settings-about-links a:first-child { padding-left: 0; }
+.settings-about-links a:hover {
+  text-decoration: underline;
+  background: var(--primary-soft, #EAF0EC);
+}
+.settings-about-sep {
+  color: var(--muted, #8A8278);
+  user-select: none;
+  margin: 0 2px;
+}
+
+/* =====================================================================
+ * Install banner — PWA install prompt (mobile only)
+ *
+ * Slides up from the bottom after the user has logged a few meals,
+ * suggesting they install Calorie Correct to their home screen. On
+ * Android Chrome, the CTA button triggers the native install dialog;
+ * on iOS Safari, it shows manual instructions. Banner is dismissible
+ * and stays dismissed for 30 days.
+ * ===================================================================== */
+.install-banner {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 950; /* above chat FAB but below modals */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(15, 30, 22, 0.18), 0 2px 6px rgba(15, 30, 22, 0.08);
+  transform: translateY(140%);
+  opacity: 0;
+  transition: transform 0.32s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.32s ease;
+  pointer-events: none;
+}
+.install-banner.show {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.install-banner-icon {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--primary-light, #9DBA82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.install-banner-icon img {
+  width: 40px;
+  height: 40px;
+  display: block;
+}
+.install-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.install-banner-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #1c2a23);
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.install-banner-sub {
+  font-size: 13px;
+  color: var(--text-muted, #5b6b62);
+  line-height: 1.35;
+}
+.install-banner-sub strong {
+  color: var(--text, #1c2a23);
+  font-weight: 600;
+}
+.install-banner-cta {
+  flex: 0 0 auto;
+  background: var(--primary-dark, #446957);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.install-banner-cta:hover { background: var(--primary, #769B6C); }
+.install-banner-cta:active { transform: scale(0.96); }
+.install-banner-dismiss {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #5b6b62);
+  font-size: 22px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s ease;
+}
+.install-banner-dismiss:hover { background: rgba(0, 0, 0, 0.05); }
+
+/* Hide on desktop entirely — install prompt only relevant on mobile */
+@media (min-width: 901px) {
+  .install-banner { display: none !important; }
+}
+
+/* When chat is expanded on mobile, push the install banner above the chat panel */
+body.chat-expanded .install-banner {
+  bottom: calc(70vh + 16px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 380px) {
+  .install-banner { padding: 10px 12px; gap: 10px; }
+  .install-banner-icon { width: 38px; height: 38px; }
+  .install-banner-icon img { width: 34px; height: 34px; }
+  .install-banner-title { font-size: 14px; }
+  .install-banner-sub { font-size: 12px; }
+  .install-banner-cta { padding: 8px 12px; font-size: 13px; }
+}

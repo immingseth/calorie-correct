@@ -567,6 +567,123 @@ function wireChatCollapseToggle() {
   });
 }
 
+/* PWA install prompt — fires a custom banner once the user has used the app
+ * a bit, suggesting they install to home screen. Two paths:
+ *  - Android Chrome (and similar): captures the beforeinstallprompt event
+ *    and shows a "Install Calorie Correct" banner with one-tap install.
+ *  - iOS Safari (no install API): shows a banner with manual instructions
+ *    ("Tap Share → Add to Home Screen").
+ * Dismissible. Stays dismissed for 30 days. Doesn't show on desktop. */
+const STORAGE_INSTALL_DISMISS_KEY = 'realcal_install_dismissed';
+const INSTALL_DISMISS_DAYS = 30;
+const INSTALL_PROMPT_MIN_MEALS = 3;
+let deferredInstallPrompt = null;
+
+function isIosSafari() {
+  const ua = navigator.userAgent || '';
+  const isIos = /iPhone|iPad|iPod/.test(ua) && !window.MSStream;
+  const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+  return isIos && isSafari;
+}
+
+function isInstalledPwa() {
+  // True if app is launched as installed PWA (standalone display mode)
+  return window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true; // iOS-specific
+}
+
+function shouldShowInstallPrompt() {
+  if (isInstalledPwa()) return false;
+  if (window.innerWidth >= 900) return false; // desktop — skip
+  // Respect dismissal
+  try {
+    const dismissedAt = parseInt(localStorage.getItem(STORAGE_INSTALL_DISMISS_KEY) || '0');
+    if (dismissedAt) {
+      const daysSince = (Date.now() - dismissedAt) / (1000 * 60 * 60 * 24);
+      if (daysSince < INSTALL_DISMISS_DAYS) return false;
+    }
+  } catch (e) {}
+  // Wait until the user has logged at least N meals — enough engagement to suggest installing
+  const mealCount = (state && state.meals) ? state.meals.length : 0;
+  if (mealCount < INSTALL_PROMPT_MIN_MEALS) return false;
+  return true;
+}
+
+function showInstallBanner(opts) {
+  // opts: { native: true } means we have a deferredPrompt to trigger
+  // opts: { ios: true } means iOS — show manual instructions
+  const native = opts && opts.native;
+  const ios = opts && opts.ios;
+  // Don't show twice
+  if (document.getElementById('install-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'install-banner';
+  banner.className = 'install-banner';
+  banner.innerHTML = `
+    <div class="install-banner-icon">
+      <img src="mobile-icon.png" alt="" width="40" height="40" />
+    </div>
+    <div class="install-banner-text">
+      <div class="install-banner-title">Install Calorie Correct</div>
+      <div class="install-banner-sub">${ios
+        ? "Tap <strong>Share</strong> → <strong>Add to Home Screen</strong> to install."
+        : "One tap to add Coach to your home screen."}</div>
+    </div>
+    ${native ? '<button class="install-banner-cta" id="install-banner-cta">Install</button>' : ''}
+    <button class="install-banner-dismiss" id="install-banner-dismiss" aria-label="Dismiss">×</button>
+  `;
+  document.body.appendChild(banner);
+
+  // Animate in
+  setTimeout(() => banner.classList.add('show'), 10);
+
+  // Wire buttons
+  const dismissBtn = document.getElementById('install-banner-dismiss');
+  if (dismissBtn) dismissBtn.addEventListener('click', () => {
+    try { localStorage.setItem(STORAGE_INSTALL_DISMISS_KEY, String(Date.now())); } catch (e) {}
+    banner.classList.remove('show');
+    setTimeout(() => banner.remove(), 300);
+  });
+
+  const ctaBtn = document.getElementById('install-banner-cta');
+  if (ctaBtn) ctaBtn.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const result = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    // Whether they accept or not, dismiss the banner
+    banner.classList.remove('show');
+    setTimeout(() => banner.remove(), 300);
+    if (result && result.outcome !== 'accepted') {
+      // Persist dismissal so we don't pester
+      try { localStorage.setItem(STORAGE_INSTALL_DISMISS_KEY, String(Date.now())); } catch (e) {}
+    }
+  });
+}
+
+function setupInstallPrompt() {
+  // Capture the install prompt event when browser fires it
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault(); // prevent the default mini-infobar
+    deferredInstallPrompt = e;
+    if (shouldShowInstallPrompt()) {
+      showInstallBanner({ native: true });
+    }
+  });
+
+  // iOS Safari has no beforeinstallprompt — show manual instructions instead
+  // after the user has hit the engagement threshold
+  if (isIosSafari()) {
+    // Wait until the app has settled (user has data, has logged some meals)
+    setTimeout(() => {
+      if (shouldShowInstallPrompt()) {
+        showInstallBanner({ ios: true });
+      }
+    }, 2000);
+  }
+}
+
 /* Hamburger menu — opens/closes the slide-in drawer (mobile only) */
 function openMobileDrawer() {
   const backdrop = document.getElementById('mobile-drawer-backdrop');
@@ -4180,6 +4297,46 @@ function openDayDetail(date) {
   modal.querySelectorAll('[data-dd-exercise-id]').forEach(el => el.addEventListener('click', () => { modal.className = 'modal'; openExerciseEdit(parseInt(el.dataset.ddExerciseId)); }));
 }
 
+/* Feedback modal — collects a short note from the user and opens their email
+ * client with a prefilled message to feedback@caloriecorrect.com. We deliberately
+ * use a mailto handoff (rather than POSTing somewhere) so during alpha there's
+ * zero server infra needed for feedback and replies happen in normal email. */
+function openFeedbackModal() {
+  const modal = document.getElementById('modal');
+  const ua = navigator.userAgent || 'unknown';
+  const screenInfo = `${window.innerWidth}x${window.innerHeight}`;
+  const installed = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-h">Send feedback</div>
+    <div class="modal-sub">Bug, idea, complaint, kind word — all welcome. Goes straight to Seth.</div>
+    <textarea id="feedback-text" class="feedback-textarea" placeholder="What's on your mind?" rows="6"></textarea>
+    <label class="feedback-meta-toggle">
+      <input type="checkbox" id="feedback-include-context" checked />
+      <span>Include browser + screen info to help debug</span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary btn-block" id="modal-send">Open email</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+  setTimeout(() => document.getElementById('feedback-text').focus(), 50);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('modal-send').addEventListener('click', () => {
+    const text = (document.getElementById('feedback-text').value || '').trim();
+    const includeContext = document.getElementById('feedback-include-context').checked;
+    if (!text) { toast('Add a quick note first'); return; }
+    const subject = 'Calorie Correct feedback';
+    let body = text;
+    if (includeContext) {
+      body += `\n\n---\nDebug info (auto-included)\nBrowser: ${ua}\nScreen: ${screenInfo}\nInstalled PWA: ${installed ? 'yes' : 'no'}\nDate: ${new Date().toISOString()}`;
+    }
+    const href = `mailto:hi@caloriecorrect.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = href;
+    closeModal();
+    toast('Thanks — opening your email');
+  });
+}
+
 function openWeighIn() {
   const today = todayISO();
   const existing = state.weights.find(w => w.date === today);
@@ -4333,19 +4490,32 @@ function openSettings() {
 
       <div class="settings-item">
         <div>
-          <div class="settings-item-label">Import Seth's data</div>
-          <div class="settings-item-detail">84 days of HEALTH spreadsheet.</div>
+          <div class="settings-item-label">Import from CSV</div>
+          <div class="settings-item-detail">Upload daily weights and calories from a spreadsheet.</div>
         </div>
-        <button class="btn btn-secondary btn-sm" id="import-seth-btn">Import</button>
+        <button class="btn btn-secondary btn-sm" id="import-csv-btn">Import</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-eyebrow">About</div>
+      <div class="settings-about-links">
+        <a href="/privacy.html" target="_blank" rel="noopener">Privacy policy</a>
+        <span class="settings-about-sep">·</span>
+        <a href="/terms.html" target="_blank" rel="noopener">Terms of service</a>
+        <span class="settings-about-sep">·</span>
+        <a href="#" id="settings-feedback-link">Send feedback</a>
       </div>
     </div>
 
     <div class="modal-actions"><button class="btn btn-secondary btn-block" id="modal-cancel">Close</button></div>`;
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  const feedbackLink = document.getElementById('settings-feedback-link');
+  if (feedbackLink) feedbackLink.addEventListener('click', (e) => { e.preventDefault(); closeModal(); setTimeout(openFeedbackModal, 120); });
   document.getElementById('reset-demo-btn').addEventListener('click', () => { if (!confirm('Reset to demo data?')) return; resetToDemoData(); closeModal(); toast('Demo data restored'); navigate('diary'); });
   document.getElementById('start-fresh-btn').addEventListener('click', () => { if (!confirm('Clear all data and start fresh?')) return; closeModal(); startOnboarding(); });
-  document.getElementById('import-seth-btn').addEventListener('click', () => { if (!confirm("Replace data with Seth's spreadsheet?")) return; importSethSpreadsheet(); });
+  document.getElementById('import-csv-btn').addEventListener('click', () => { closeModal(); setTimeout(openCsvImportModal, 120); });
   document.getElementById('settings-activity').addEventListener('change', (e) => { state.user.activityLevel = e.target.value; saveState(); toast(`Activity level updated`); });
   document.getElementById('export-json-btn').addEventListener('click', () => exportData('json'));
   document.getElementById('export-csv-btn').addEventListener('click', () => exportData('csv'));
@@ -4461,6 +4631,279 @@ const SETH_SPREADSHEET_DATA = [
   ['2026-04-28', 266.5, 1967, 500], ['2026-04-29', 265.6, 2292, 600], ['2026-04-30', 265.8, 2292, 600],
   ['2026-05-01', 268.0, 6589, 600], ['2026-05-02', 268.0, 6589, 600],
 ];
+
+/* =====================================================
+   CSV IMPORT — generic spreadsheet upload
+   =====================================================
+   Lets users bulk-import historical data from a CSV they've kept elsewhere
+   (Google Sheets, Excel, MyFitnessPal export, etc.). Expected columns:
+     date, weight, calories_in, calories_out
+   Header row required. Column names are matched case-insensitively against a
+   small set of aliases so common exports work without renaming. Empty cells
+   are fine — partial rows still import what they have.
+   Two import modes:
+     replace — wipes existing weights/meals/exercises, imports the CSV
+     merge   — keeps existing data, adds CSV rows; dates that already have
+               meal or exercise entries are not overwritten (weights are) */
+
+const CSV_HEADER_ALIASES = {
+  date:          ['date', 'day', 'when'],
+  weight:        ['weight', 'weight_lb', 'weight_lbs', 'lbs', 'lb', 'morning_weight'],
+  calories_in:   ['calories_in', 'caloriesin', 'calories', 'intake', 'in', 'kcal_in', 'eaten', 'consumed'],
+  calories_out:  ['calories_out', 'caloriesout', 'burn', 'burned', 'out', 'kcal_out', 'exercise', 'exercise_calories', 'tracker', 'tdee_actual'],
+};
+
+function downloadCsvTemplate() {
+  const today = todayISO();
+  const yest = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+  const dayBefore = new Date(Date.now() - 2 * 86400000).toISOString().slice(0,10);
+  const csv = `date,weight,calories_in,calories_out\n${dayBefore},185.4,2100,420\n${yest},185.1,1850,510\n${today},184.8,,380\n`;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'calorie-correct-template.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
+/* Tiny CSV parser — handles quoted fields and embedded commas. Doesn't
+ * support multi-line cells (rare in spreadsheets people hand-edit). */
+function parseCsvText(text) {
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length === 0) return { rows: [], error: 'File is empty.' };
+  const sep = lines[0].includes('\t') && !lines[0].includes(',') ? '\t' : ',';
+  const splitRow = (line) => {
+    const cells = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') { inQuotes = false; }
+        else { cur += ch; }
+      } else {
+        if (ch === '"') { inQuotes = true; }
+        else if (ch === sep) { cells.push(cur); cur = ''; }
+        else { cur += ch; }
+      }
+    }
+    cells.push(cur);
+    return cells.map(c => c.trim());
+  };
+  const headerCells = splitRow(lines[0]).map(h => h.toLowerCase().replace(/[\s\-]+/g, '_'));
+  const colIndex = {};
+  for (const [field, aliases] of Object.entries(CSV_HEADER_ALIASES)) {
+    for (let i = 0; i < headerCells.length; i++) {
+      if (aliases.includes(headerCells[i])) { colIndex[field] = i; break; }
+    }
+  }
+  if (colIndex.date == null) {
+    return { rows: [], error: 'No "date" column found. First row must be headers including a date column.' };
+  }
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = splitRow(lines[i]);
+    const rawDate = (cells[colIndex.date] || '').trim();
+    const date = parseFlexibleDate(rawDate);
+    if (!date) continue; // skip rows without a parseable date
+    const weight = colIndex.weight != null ? parseFloat(cells[colIndex.weight]) : NaN;
+    const calIn  = colIndex.calories_in != null ? parseFloat(cells[colIndex.calories_in]) : NaN;
+    const calOut = colIndex.calories_out != null ? parseFloat(cells[colIndex.calories_out]) : NaN;
+    rows.push({
+      date,
+      weight: !isNaN(weight) && weight > 0 ? weight : null,
+      caloriesIn:  !isNaN(calIn)  && calIn  >= 0 ? Math.round(calIn)  : null,
+      caloriesOut: !isNaN(calOut) && calOut >= 0 ? Math.round(calOut) : null,
+    });
+  }
+  return { rows, error: null };
+}
+
+/* Accept YYYY-MM-DD, MM/DD/YYYY, M/D/YY, or anything Date.parse handles.
+ * Returns ISO date string or null. */
+function parseFlexibleDate(s) {
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return s;
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (us) {
+    let [, m, d, y] = us;
+    if (y.length === 2) y = (parseInt(y) > 50 ? '19' : '20') + y;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const t = Date.parse(s);
+  if (!isNaN(t)) {
+    const dt = new Date(t);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+  return null;
+}
+
+function applyCsvImport(rows, mode) {
+  // mode: 'replace' or 'merge'
+  if (mode === 'replace') {
+    state.weights = [];
+    state.meals = [];
+    state.exercises = [];
+  }
+  let mealId = (state.meals.reduce((m, x) => Math.max(m, x.id || 0), 0) || 0) + 1;
+  let exId   = (state.exercises.reduce((m, x) => Math.max(m, x.id || 0), 0) || 1000000) + 1;
+  let weightsAdded = 0, mealsAdded = 0, exercisesAdded = 0, weightsSkipped = 0, mealsSkipped = 0, exercisesSkipped = 0;
+  for (const r of rows) {
+    if (r.weight != null) {
+      const existingIdx = state.weights.findIndex(w => w.date === r.date);
+      if (existingIdx >= 0) {
+        state.weights[existingIdx].weight = r.weight;
+      } else {
+        state.weights.push({ date: r.date, weight: r.weight });
+        weightsAdded++;
+      }
+    }
+    if (r.caloriesIn != null) {
+      const hasMeal = state.meals.some(m => m.date === r.date);
+      if (hasMeal && mode === 'merge') { mealsSkipped++; }
+      else {
+        state.meals.push({
+          id: mealId++, date: r.date, time: '12:00', mealType: 'imported',
+          raw: 'Daily total (CSV import)',
+          items: [{ name: 'Daily total', calories: r.caloriesIn, source: 'imported' }],
+          totalCal: r.caloriesIn, source: 'imported',
+        });
+        mealsAdded++;
+      }
+    }
+    if (r.caloriesOut != null && r.caloriesOut > 0) {
+      const hasEx = state.exercises.some(e => e.date === r.date);
+      if (hasEx && mode === 'merge') { exercisesSkipped++; }
+      else {
+        state.exercises.push({
+          id: exId++, date: r.date, time: '17:00', type: 'other',
+          typeName: 'Daily activity (imported)', typeEmoji: '⌚',
+          duration: 0, caloriesBurned: r.caloriesOut,
+          note: 'Imported from CSV', source: 'imported',
+        });
+        exercisesAdded++;
+      }
+    }
+  }
+  state.weights.sort((a, b) => a.date.localeCompare(b.date));
+  state.meals.sort((a, b) => a.date.localeCompare(b.date));
+  state.exercises.sort((a, b) => a.date.localeCompare(b.date));
+  saveState();
+  return { weightsAdded, mealsAdded, exercisesAdded, weightsSkipped, mealsSkipped, exercisesSkipped };
+}
+
+function openCsvImportModal() {
+  const modal = document.getElementById('modal');
+  let parsedRows = null; // populated after a file is chosen and parsed
+  modal.className = 'modal modal-wide';
+  modal.innerHTML = `<div class="modal-h">Import from CSV</div>
+    <div class="modal-sub">Bulk-upload past weights and daily calorie totals from a spreadsheet.</div>
+
+    <div class="csv-import-info">
+      <div class="csv-import-info-title">Expected columns</div>
+      <div class="csv-import-info-cols"><code>date</code> · <code>weight</code> · <code>calories_in</code> · <code>calories_out</code></div>
+      <div class="csv-import-info-meta">First row = headers. Date format: <code>YYYY-MM-DD</code> or <code>MM/DD/YYYY</code>. Empty cells are fine. Common header names like "intake", "burn", "lbs" are recognized automatically.</div>
+      <button class="btn btn-link csv-template-link" id="csv-template-btn" type="button">Download a starter template</button>
+    </div>
+
+    <input type="file" id="csv-file-input" accept=".csv,.tsv,text/csv,text/tab-separated-values" style="display:none;" />
+    <button class="btn btn-secondary btn-block" id="csv-pick-btn">Choose CSV file…</button>
+    <div id="csv-preview" class="csv-preview"></div>
+
+    <div class="csv-import-mode" id="csv-import-mode" style="display:none;">
+      <label class="csv-mode-option">
+        <input type="radio" name="csv-mode" value="replace" />
+        <div>
+          <div class="csv-mode-title">Replace all data</div>
+          <div class="csv-mode-detail">Wipes existing weights, meals, and exercises and uses only the CSV.</div>
+        </div>
+      </label>
+      <label class="csv-mode-option">
+        <input type="radio" name="csv-mode" value="merge" checked />
+        <div>
+          <div class="csv-mode-title">Merge with existing data</div>
+          <div class="csv-mode-detail">Adds new rows. Dates that already have meals or exercise are kept as-is; weights get updated.</div>
+        </div>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary btn-block" id="csv-import-btn" disabled>Import</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+
+  const fileInput = document.getElementById('csv-file-input');
+  const pickBtn = document.getElementById('csv-pick-btn');
+  const preview = document.getElementById('csv-preview');
+  const modeBox = document.getElementById('csv-import-mode');
+  const importBtn = document.getElementById('csv-import-btn');
+  const templateBtn = document.getElementById('csv-template-btn');
+
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  templateBtn.addEventListener('click', downloadCsvTemplate);
+  pickBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    pickBtn.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      const result = parseCsvText(text);
+      if (result.error) {
+        preview.style.display = 'block';
+        preview.innerHTML = `<div class="csv-preview-error">${escapeAttr(result.error)}</div>`;
+        modeBox.style.display = 'none';
+        importBtn.disabled = true;
+        parsedRows = null;
+        return;
+      }
+      parsedRows = result.rows;
+      const nWeights = parsedRows.filter(r => r.weight != null).length;
+      const nIn = parsedRows.filter(r => r.caloriesIn != null).length;
+      const nOut = parsedRows.filter(r => r.caloriesOut != null).length;
+      const dates = parsedRows.map(r => r.date).sort();
+      const dateRange = dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : '—';
+      preview.style.display = 'block';
+      preview.innerHTML = parsedRows.length === 0
+        ? `<div class="csv-preview-error">No valid rows found. Make sure each row has a date.</div>`
+        : `<div class="csv-preview-stats">
+            <div><strong>${parsedRows.length}</strong> rows · <strong>${dateRange}</strong></div>
+            <div class="csv-preview-meta">${nWeights} weights · ${nIn} daily intake · ${nOut} daily exercise</div>
+          </div>`;
+      modeBox.style.display = parsedRows.length > 0 ? 'flex' : 'none';
+      importBtn.disabled = parsedRows.length === 0;
+    };
+    reader.onerror = () => {
+      preview.style.display = 'block';
+      preview.innerHTML = `<div class="csv-preview-error">Couldn't read that file. Make sure it's a CSV.</div>`;
+      importBtn.disabled = true;
+    };
+    reader.readAsText(file);
+  });
+
+  importBtn.addEventListener('click', () => {
+    if (!parsedRows || parsedRows.length === 0) return;
+    const mode = (document.querySelector('input[name="csv-mode"]:checked') || {}).value || 'merge';
+    if (mode === 'replace' && !confirm(`Replace all existing data with these ${parsedRows.length} rows? This can't be undone.`)) return;
+    const summary = applyCsvImport(parsedRows, mode);
+    closeModal();
+    const parts = [];
+    if (summary.weightsAdded) parts.push(`${summary.weightsAdded} weights`);
+    if (summary.mealsAdded) parts.push(`${summary.mealsAdded} intake`);
+    if (summary.exercisesAdded) parts.push(`${summary.exercisesAdded} exercise`);
+    const skipped = summary.mealsSkipped + summary.exercisesSkipped;
+    const msg = parts.length ? `Imported: ${parts.join(', ')}` : 'Nothing new imported';
+    toast(skipped > 0 ? `${msg} · ${skipped} kept existing` : msg);
+    navigate('diary');
+  });
+}
 
 function importSethSpreadsheet() {
   const newState = {
@@ -4707,6 +5150,10 @@ function init() {
   // Mobile chat — collapse/expand via FAB and × button
   wireChatCollapseToggle();
   applyChatExpanded(isChatExpanded());
+
+  // PWA install prompt — fires once user has used the app a bit
+  setupInstallPrompt();
+
   document.getElementById('modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'modal-backdrop') closeModal(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
