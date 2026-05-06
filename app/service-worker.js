@@ -13,7 +13,7 @@
  * get cleaned up on the next install.
  */
 
-const CACHE_VERSION = 'cc-shell-v6';
+const CACHE_VERSION = 'cc-shell-v7';
 const APP_SHELL = [
   '/app/',
   '/app/index.html',

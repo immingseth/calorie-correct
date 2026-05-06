@@ -4212,8 +4212,11 @@ input[type="range"]::-moz-range-thumb {
   #view-container > [data-mobile-tab="coach"] .home-chips { display: none; }
 
   /* Tab content — scrolls naturally above the persistent chat strip.
-     Bottom padding clears the chat strip + safe-area inset. */
-  body.mtab-diary .main { display: none; }
+     Bottom padding clears the chat strip + safe-area inset.
+     On Diary tab, .main and #view-container use display:contents to drop out
+     of the grid (the chat strip is position:fixed so it keeps rendering). */
+  body.mtab-diary .main { display: contents; }
+  body.mtab-diary #view-container { display: contents; }
   body.mtab-results .right-panel { display: none; }
   body.mtab-diary .right-panel,
   body.mtab-results .main {
