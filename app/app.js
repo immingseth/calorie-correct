@@ -524,6 +524,49 @@ function wireMobileTabBar() {
   });
 }
 
+/* Mobile chat collapse — chat-expanded body class controls whether the
+ * Coach chat panel is visible (expanded) or replaced by a floating
+ * Coach button (collapsed). State persists in localStorage so the user's
+ * preference sticks. Default on first install: expanded so they see the
+ * morning greeting; once they collapse it, stays collapsed. */
+const STORAGE_CHAT_OPEN_KEY = 'realcal_chat_open';
+
+function isChatExpanded() {
+  try {
+    const v = localStorage.getItem(STORAGE_CHAT_OPEN_KEY);
+    if (v === null) return true; // default open on first load
+    return v === '1';
+  } catch (e) { return true; }
+}
+function setChatExpanded(open) {
+  try { localStorage.setItem(STORAGE_CHAT_OPEN_KEY, open ? '1' : '0'); } catch (e) {}
+  applyChatExpanded(open);
+}
+function applyChatExpanded(open) {
+  document.body.classList.toggle('chat-expanded', !!open);
+  // When opening, scroll chat history to bottom so latest is visible
+  if (open) {
+    setTimeout(() => {
+      const histEl = document.getElementById('chat-history');
+      if (histEl) histEl.scrollTop = histEl.scrollHeight;
+      const inp = document.getElementById('chat-input');
+      if (inp) inp.focus();
+    }, 200);
+  }
+}
+function wireChatCollapseToggle() {
+  // FAB is a single element in index.html; collapse button is rendered inside
+  // the chat strip and re-rendered every time the app re-renders, so we need
+  // to use event delegation for it.
+  const fab = document.getElementById('chat-fab');
+  if (fab) fab.addEventListener('click', () => setChatExpanded(true));
+  // Delegate the collapse button click to body since the chat strip re-renders
+  document.body.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('#chat-collapse-btn');
+    if (btn) setChatExpanded(false);
+  });
+}
+
 /* Hamburger menu — opens/closes the slide-in drawer (mobile only) */
 function openMobileDrawer() {
   const backdrop = document.getElementById('mobile-drawer-backdrop');
@@ -2242,6 +2285,9 @@ function renderChatStrip(opts) {
 
   return `
     <div class="chat-strip${big ? ' chat-strip-big' : ''}">
+      <button class="chat-collapse-btn" id="chat-collapse-btn" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
+      </button>
       ${turnsHtml ? `<div class="chat-history" id="chat-history">${turnsHtml}</div>` : ''}
 
       <div class="home-input-card chat-input-card">
@@ -4657,6 +4703,10 @@ function init() {
   wireMobileTabBar();
   wireHamburger();
   applyMobileTab(getMobileTab());
+
+  // Mobile chat — collapse/expand via FAB and × button
+  wireChatCollapseToggle();
+  applyChatExpanded(isChatExpanded());
   document.getElementById('modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'modal-backdrop') closeModal(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 

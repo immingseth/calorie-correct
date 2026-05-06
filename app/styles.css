@@ -4000,6 +4000,8 @@ input[type="range"]::-moz-range-thumb {
    =========================================================== */
 .hamburger-btn { display: none; }
 .mobile-drawer-backdrop { display: none; }
+.chat-fab { display: none; }
+.chat-collapse-btn { display: none; }
 
 /* Tablet and below — collapse to single column with bottom tab nav.
    Sidebar becomes a thin top strip with profile + weigh-in.
@@ -4174,9 +4176,10 @@ input[type="range"]::-moz-range-thumb {
     background: var(--primary-soft);
   }
 
-  /* === Persistent Coach chat — pinned at bottom of viewport on every tab.
-     User can log meals or ask questions from any view without switching. === */
-  #view-container > [data-mobile-tab="coach"] {
+  /* === Coach chat panel — pinned at bottom of viewport when expanded.
+     When collapsed (default), the panel is hidden and a floating Coach
+     button (FAB) appears in the bottom-right corner. Tap to expand. === */
+  body.chat-expanded #view-container > [data-mobile-tab="coach"] {
     position: fixed;
     bottom: 0;
     left: 0;
@@ -4184,26 +4187,35 @@ input[type="range"]::-moz-range-thumb {
     background: var(--card);
     border-top: 0.5px solid var(--border);
     z-index: 40;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
-    box-shadow: 0 -4px 14px rgba(60, 50, 40, 0.06);
-    /* Chat will scroll internally up to this max height */
-    max-height: 50vh;
+    padding: 30px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 14px rgba(60, 50, 40, 0.08);
+    max-height: 60vh;
     display: flex;
     flex-direction: column;
+    animation: chat-slide-up 0.22s ease;
   }
-  #view-container > [data-mobile-tab="coach"] .chat-strip,
-  #view-container > [data-mobile-tab="coach"] .chat-strip-big {
+  body:not(.chat-expanded) #view-container > [data-mobile-tab="coach"] {
+    display: none;
+  }
+  @keyframes chat-slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  body.chat-expanded #view-container > [data-mobile-tab="coach"] .chat-strip,
+  body.chat-expanded #view-container > [data-mobile-tab="coach"] .chat-strip-big {
     margin-bottom: 0;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    position: relative;
   }
-  #view-container > [data-mobile-tab="coach"] .chat-history {
-    max-height: 32vh;
+  body.chat-expanded #view-container > [data-mobile-tab="coach"] .chat-history {
+    max-height: 38vh;
     margin-bottom: 10px;
   }
-  #view-container > [data-mobile-tab="coach"] .chat-input-card,
-  #view-container > [data-mobile-tab="coach"] .chat-strip-big .chat-input-card {
+  body.chat-expanded #view-container > [data-mobile-tab="coach"] .chat-input-card,
+  body.chat-expanded #view-container > [data-mobile-tab="coach"] .chat-strip-big .chat-input-card {
     margin-bottom: 0;
     padding: 12px 14px;
   }
@@ -4211,16 +4223,64 @@ input[type="range"]::-moz-range-thumb {
   #view-container > [data-mobile-tab="coach"] .chat-hint,
   #view-container > [data-mobile-tab="coach"] .home-chips { display: none; }
 
-  /* Tab content — scrolls naturally above the persistent chat strip.
-     Bottom padding clears the chat strip + safe-area inset.
+  /* Close button — floating × in the top-right of the expanded chat panel */
+  body.chat-expanded .chat-collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: -22px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--card);
+    border: 0.5px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    z-index: 2;
+    box-shadow: 0 1px 3px rgba(60, 50, 40, 0.08);
+  }
+  body.chat-expanded .chat-collapse-btn:hover { color: var(--text); }
+
+  /* Floating Coach button (FAB) — visible when chat is collapsed */
+  body:not(.chat-expanded) .chat-fab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    right: 20px;
+    z-index: 50;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--primary-dark);
+    color: white;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(74, 99, 84, 0.30);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  body:not(.chat-expanded) .chat-fab:hover { transform: scale(1.05); }
+  body:not(.chat-expanded) .chat-fab:active { transform: scale(0.95); }
+
+  /* Tab content — scrolls naturally above the chat strip / FAB.
+     Padding-bottom adapts: more when chat expanded (clear panel),
+     less when collapsed (clear FAB only).
      On Diary tab, .main and #view-container use display:contents to drop out
      of the grid (the chat strip is position:fixed so it keeps rendering). */
   body.mtab-diary .main { display: contents; }
   body.mtab-diary #view-container { display: contents; }
   body.mtab-results .right-panel { display: none; }
-  body.mtab-diary .right-panel,
-  body.mtab-results .main {
-    padding-bottom: calc(220px + env(safe-area-inset-bottom, 0px));
+
+  body.chat-expanded.mtab-diary .right-panel,
+  body.chat-expanded.mtab-results .main {
+    padding-bottom: calc(60vh + 20px + env(safe-area-inset-bottom, 0px));
+  }
+  body:not(.chat-expanded).mtab-diary .right-panel,
+  body:not(.chat-expanded).mtab-results .main {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Adjustments for content sizing on small screens */
