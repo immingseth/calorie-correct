@@ -4310,6 +4310,233 @@ input[type="range"]::-moz-range-thumb {
   .log-textarea { font-size: 16px; padding: 16px 18px; }
 }
 
+/* =====================================================================
+ * Recipes — chat strip row + manager modal + edit modal
+ * ===================================================================== */
+
+/* Recipes row inside the chat input card. Sits just above "Quick:". */
+.recipes-row {
+  margin-top: 4px;
+}
+.recipe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--primary-light, #9DBA82);
+  background: var(--primary-soft, #EAF0EC);
+  color: var(--primary-dark, #446957);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.recipe-chip:hover { background: #d8e4d9; }
+.recipe-chip:active { transform: scale(0.97); }
+.recipe-chip-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-chip-cal {
+  font-size: 11px;
+  color: var(--primary-dark, #446957);
+  background: #fff;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.recipes-manage-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px dashed var(--muted, #8A8278);
+  background: transparent;
+  color: var(--muted, #8A8278);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.recipes-manage-btn:hover { border-color: var(--primary-dark, #446957); color: var(--primary-dark, #446957); }
+.recipes-empty-cta {
+  font-size: 12.5px;
+  color: var(--muted, #8A8278);
+  background: transparent;
+  border: 1px dashed var(--muted, #8A8278);
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.recipes-empty-cta:hover { color: var(--primary-dark, #446957); border-color: var(--primary-dark, #446957); }
+
+/* Recipes manager modal — list of all recipes with log/edit per row. */
+.recipes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 8px 0 12px;
+  padding-right: 4px;
+}
+.recipes-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted, #8A8278);
+  background: var(--primary-soft, #EAF0EC);
+  border-radius: 12px;
+  line-height: 1.5;
+}
+.recipe-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 12px;
+}
+.recipe-row-main { flex: 1 1 auto; min-width: 0; }
+.recipe-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.recipe-row-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #1c2a23);
+}
+.recipe-row-cal {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-dark, #446957);
+}
+.recipe-row-cal .cal-unit { font-size: 11px; color: var(--muted, #8A8278); font-weight: 400; }
+.recipe-row-ingredients {
+  font-size: 12.5px;
+  color: var(--text-soft, #4A4540);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 2px;
+}
+.recipe-row-macros {
+  font-size: 11px;
+  color: var(--muted, #8A8278);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.recipe-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* Recipe edit modal — name + ingredient grid */
+.recipe-edit-section { margin-bottom: 16px; }
+.recipe-edit-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.recipe-edit-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-dark, #446957);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+.recipe-edit-total {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark, #446957);
+}
+.recipe-edit-input {
+  width: 100%;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text, #1c2a23);
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.recipe-edit-input:focus {
+  outline: none;
+  border-color: var(--primary, #769B6C);
+  box-shadow: 0 0 0 3px rgba(118, 155, 108, 0.15);
+}
+.recipe-edit-fullname { font-size: 16px; padding: 10px 12px; }
+.recipe-edit-row {
+  background: #fff;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.recipe-edit-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.recipe-edit-name { font-weight: 500; }
+.recipe-edit-remove {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #8A8278);
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.recipe-edit-remove:hover { background: rgba(0,0,0,0.05); color: #b54b3a; }
+.recipe-edit-row-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr;
+  gap: 6px;
+}
+.recipe-edit-cell label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted, #8A8278);
+  margin-bottom: 2px;
+}
+.recipe-edit-cell .recipe-edit-input { font-size: 13px; padding: 6px 8px; }
+.recipe-edit-add {
+  margin-top: 4px;
+  width: 100%;
+}
+.recipe-edit-delete {
+  background: #fcf0ed !important;
+  color: #b54b3a !important;
+  border-color: #f4d4cd !important;
+}
+.recipe-edit-delete:hover { background: #f8e0d9 !important; }
+
+@media (max-width: 600px) {
+  .recipe-edit-row-grid { grid-template-columns: 2fr 1fr 1fr 1fr; }
+  .recipe-edit-cell:nth-child(5),
+  .recipe-edit-cell:nth-child(6) { grid-column: span 2; }
+  .recipe-row { flex-direction: column; align-items: stretch; }
+  .recipe-row-actions { flex-direction: row; }
+}
+
 /* CSV import modal — file picker, parse preview, mode selector */
 .csv-import-info {
   background: var(--primary-soft, #EAF0EC);

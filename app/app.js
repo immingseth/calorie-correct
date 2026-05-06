@@ -737,7 +737,7 @@ function makeBlankState() {
       targetLossRate: 1.0,
       lastGreetingDate: null,
     },
-    weights: [], meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [],
+    weights: [], meals: [], exercises: [], dayNotes: {}, recipes: [], water: [],
     onboarded: false,
   };
 }
@@ -764,8 +764,30 @@ function migrateState(s) {
   if (s.user.targetLossRate == null) s.user.targetLossRate = 1.0; // lb/week
   if (s.user.lastGreetingDate === undefined) s.user.lastGreetingDate = null;
   if (!s.dayNotes) s.dayNotes = {}; // map of dateISO → note text
-  if (!Array.isArray(s.savedMeals)) s.savedMeals = []; // user-defined meal templates
   if (!Array.isArray(s.water)) s.water = []; // water log: array of { id, date, time, oz }
+  // Recipes were previously called "savedMeals" — migrate forward.
+  if (!Array.isArray(s.recipes)) {
+    s.recipes = Array.isArray(s.savedMeals) ? s.savedMeals : [];
+  }
+  delete s.savedMeals;
+  // Upgrade legacy recipe item shape (just {name, calories}) to include macros
+  // + portion so newly-logged-from-recipe meals have the same shape as Claude
+  // meal logs. Old recipes will still work; macros default to 0.
+  s.recipes = s.recipes.map(r => ({
+    id: r.id,
+    name: r.name,
+    createdAt: r.createdAt || todayISO(),
+    updatedAt: r.updatedAt || r.createdAt || todayISO(),
+    items: (r.items || []).map(i => ({
+      name: i.name || 'item',
+      portion: i.portion || '',
+      calories: parseInt(i.calories) || 0,
+      protein_g: parseFloat(i.protein_g) || 0,
+      carbs_g: parseFloat(i.carbs_g) || 0,
+      fat_g: parseFloat(i.fat_g) || 0,
+      fiber_g: parseFloat(i.fiber_g) || 0,
+    })),
+  }));
   return s;
 }
 
@@ -805,7 +827,7 @@ function resetToBlank(profile) {
     meals: [],
     exercises: [],
     dayNotes: {},
-    savedMeals: [],
+    recipes: [],
     water: [],
     onboarded: true,
   };
@@ -2404,6 +2426,15 @@ function buildUserContext(s) {
     }));
   const todayBurnCal = todayExercises.reduce((sum, x) => sum + (x.caloriesBurned || 0), 0);
 
+  // User's saved recipes — Coach uses these to recognize "log my morning
+  // smoothie" and to update existing recipes by name.
+  const recipes = (s.recipes || []).map(r => ({
+    id: r.id,
+    name: r.name,
+    totalCal: (r.items || []).reduce((sum, x) => sum + (parseInt(x.calories) || 0), 0),
+    ingredients: (r.items || []).map(i => i.name).filter(Boolean).join(', ').slice(0, 120),
+  }));
+
   return {
     name: s.user.name,
     sex: s.user.sex,
@@ -2420,6 +2451,7 @@ function buildUserContext(s) {
     todayBurnCal,
     todayMeals,
     todayExercises,
+    recipes,
     daysOfData: (s.weights || []).length,
     calibrationReady: !!cal.ready,
     observedAccuracyPct: (cal.ready && cal.trackingAccuracy != null) ? Math.round(cal.trackingAccuracy * 100) : null,
@@ -2533,6 +2565,8 @@ function renderChatStrip(opts) {
         </div>
 
         ${showHint ? `<div class="chat-hint">${hintText}</div>` : ''}
+
+        ${renderRecipesRow()}
 
         ${recent.length > 0 ? `<div class="home-chips">
           <span class="home-chips-label">Quick:</span>
@@ -2771,6 +2805,9 @@ function wireChatStrip() {
   // Photo input — file picker + compress + Worker call
   wirePhotoButton();
 
+  // Recipe chips + manage button live in the chat input card too.
+  wireRecipesRow();
+
   const submit = () => {
     const text = inp.value.trim();
     if (!text) return;
@@ -2859,6 +2896,76 @@ function wireChatStrip() {
           state.exercises.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
           saveState();
           resolveChatTurn(turnId, remote.summary || `Logged ${created.length} activit${created.length === 1 ? 'y' : 'ies'}.`, 'log');
+        } else if (remote && remote.intent === 'log_recipe' && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
+          // Coach matched the user's request to one or more existing recipes — log each.
+          const logged = [];
+          for (const op of remote.operations) {
+            if (op.action !== 'log_recipe') continue;
+            const meal = logRecipeById(parseInt(op.recipe_id), { silent: true });
+            if (meal) logged.push(meal);
+          }
+          if (logged.length > 0) {
+            const total = logged.reduce((s, m) => s + m.totalCal, 0);
+            toast(`Logged ${logged.length} recipe${logged.length === 1 ? '' : 's'} (${total} cal)`, { undo: true });
+            resolveChatTurn(turnId, remote.summary || `Logged your recipe (${total} cal).`, 'log');
+          } else {
+            resolveChatTurn(turnId, remote.summary || "I couldn't find that recipe — has it been deleted?", 'coach');
+          }
+        } else if (remote && remote.intent === 'save_recipe' && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
+          // Coach is creating a recipe — either from a logged meal (source_meal_id)
+          // or from scratch (items array). Either path produces a normalized recipe.
+          const created = [];
+          for (const op of remote.operations) {
+            if (op.action !== 'save_recipe') continue;
+            const name = (op.name || '').trim();
+            if (!name) continue;
+            let items = [];
+            if (op.source_meal_id != null) {
+              const meal = state.meals.find(m => m.id === parseInt(op.source_meal_id));
+              if (meal && Array.isArray(meal.items)) items = meal.items.map(i => ({
+                name: i.name || 'item',
+                portion: i.portion || '',
+                calories: parseInt(i.calories) || 0,
+                protein_g: parseFloat(i.protein_g) || 0,
+                carbs_g: parseFloat(i.carbs_g) || 0,
+                fat_g: parseFloat(i.fat_g) || 0,
+                fiber_g: parseFloat(i.fiber_g) || 0,
+              }));
+            } else if (Array.isArray(op.items)) {
+              items = op.items.map(i => ({
+                name: i.name || 'item',
+                portion: i.portion || '',
+                calories: parseInt(i.calories) || 0,
+                protein_g: parseFloat(i.protein_g) || 0,
+                carbs_g: parseFloat(i.carbs_g) || 0,
+                fat_g: parseFloat(i.fat_g) || 0,
+                fiber_g: parseFloat(i.fiber_g) || 0,
+              }));
+            }
+            if (items.length === 0) continue;
+            if (!Array.isArray(state.recipes)) state.recipes = [];
+            // If a recipe with this exact name already exists, replace it. Coach's
+            // "update my morning smoothie to use 250g yogurt" lands here.
+            const existingIdx = state.recipes.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
+            const recipe = {
+              id: existingIdx >= 0 ? state.recipes[existingIdx].id : Date.now(),
+              name,
+              items,
+              createdAt: existingIdx >= 0 ? state.recipes[existingIdx].createdAt : todayISO(),
+              updatedAt: todayISO(),
+            };
+            if (existingIdx >= 0) state.recipes[existingIdx] = recipe;
+            else state.recipes.push(recipe);
+            created.push(recipe);
+          }
+          if (created.length > 0) {
+            saveState();
+            const noun = created.length === 1 ? `"${created[0].name}"` : `${created.length} recipes`;
+            toast(`Saved recipe ${noun}`);
+            resolveChatTurn(turnId, remote.summary || `Saved ${noun}.`, 'log');
+          } else {
+            resolveChatTurn(turnId, remote.summary || "I couldn't build that recipe — try giving me the ingredients.", 'coach');
+          }
         } else if (remote && (remote.intent === 'delete' || remote.intent === 'edit') && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
           // Coach edit/delete — apply each operation against today's log and
           // surface an undo toast so the user can roll back if Coach got it wrong.
@@ -3622,71 +3729,354 @@ function wireCopyYesterdayBtn() {
   if (btn) btn.addEventListener('click', copyYesterdayToToday);
 }
 
-/* Saved meals — user-defined combos like "My breakfast". One tap logs all components. */
-function renderSavedMealsStrip() {
-  const meals = (state.savedMeals || []).slice().sort((a, b) => a.name.localeCompare(b.name));
-  if (meals.length === 0) return '';
-  return `<div class="saved-meals-strip">
-    <div class="saved-meals-label">SAVED MEALS</div>
-    <div class="saved-meals-chips">
-      ${meals.map((m) => {
-        const total = m.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
-        return `<button class="saved-meal-chip" data-saved-id="${m.id}" title="${escapeAttr(m.items.map(i => i.name).join(', '))}">
-          <span class="saved-meal-name">${escapeAttr(m.name)}</span>
-          <span class="saved-meal-cal">${total}</span>
-        </button>`;
-      }).join('')}
-    </div>
+/* ============================================================
+   RECIPES — user-defined ingredient lists they can re-log with one tap.
+   Examples: "Morning smoothie", "Greek yogurt bowl", "My usual lunch."
+   Created via Coach chat or the recipes manager modal.
+   ============================================================ */
+
+function recipeTotalCal(r) {
+  return (r.items || []).reduce((sum, x) => sum + (parseInt(x.calories) || 0), 0);
+}
+
+/* Sum macros across a recipe's ingredients. Returns {protein, carbs, fat, fiber}. */
+function recipeMacros(r) {
+  const out = { protein: 0, carbs: 0, fat: 0, fiber: 0 };
+  for (const i of (r.items || [])) {
+    out.protein += parseFloat(i.protein_g) || 0;
+    out.carbs   += parseFloat(i.carbs_g)   || 0;
+    out.fat     += parseFloat(i.fat_g)     || 0;
+    out.fiber   += parseFloat(i.fiber_g)   || 0;
+  }
+  return out;
+}
+
+/* Render the recipes row that lives inside the chat input card, just above
+ * the "Quick:" recents. Chips log on tap; the gear icon opens the manager. */
+function renderRecipesRow() {
+  const recipes = (state.recipes || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const chips = recipes.map(r => {
+    const total = recipeTotalCal(r);
+    const ingredients = (r.items || []).map(i => i.name).filter(Boolean).join(', ');
+    return `<button class="recipe-chip home-chip" data-recipe-id="${r.id}" title="${escapeAttr(ingredients)}">
+      <span class="recipe-chip-name">${escapeAttr(r.name)}</span>
+      <span class="recipe-chip-cal">${total}</span>
+    </button>`;
+  }).join('');
+
+  const manageBtn = `<button class="recipes-manage-btn home-chip" id="recipes-manage-btn" title="Manage recipes" aria-label="Manage recipes">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>`;
+
+  if (recipes.length === 0) {
+    return `<div class="home-chips recipes-row">
+      <span class="home-chips-label">Recipes:</span>
+      <button class="recipes-empty-cta home-chip" id="recipes-manage-btn">+ Add a recipe</button>
+    </div>`;
+  }
+
+  return `<div class="home-chips recipes-row">
+    <span class="home-chips-label">Recipes:</span>
+    ${chips}
+    ${manageBtn}
   </div>`;
 }
 
-function logSavedMeal(savedId) {
-  const saved = (state.savedMeals || []).find(m => m.id === savedId);
-  if (!saved) return;
+/* Apply a recipe by id: clones its ingredients into a fresh meal entry on
+ * the selected date. Used by chip taps, by Coach "log my X" intents, and
+ * shows up in the day's log immediately. Returns the created meal or null. */
+function logRecipeById(recipeId, opts = {}) {
+  const recipe = (state.recipes || []).find(r => r.id === recipeId);
+  if (!recipe) return null;
   const now = new Date();
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const totalCal = saved.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+  const items = (recipe.items || []).map(i => ({
+    name: i.name || 'item',
+    portion: i.portion || '',
+    calories: parseInt(i.calories) || 0,
+    protein_g: parseFloat(i.protein_g) || 0,
+    carbs_g: parseFloat(i.carbs_g) || 0,
+    fat_g: parseFloat(i.fat_g) || 0,
+    fiber_g: parseFloat(i.fiber_g) || 0,
+    source: 'recipe',
+  }));
+  const totalCal = items.reduce((s, x) => s + x.calories, 0);
   const meal = {
     id: Date.now(),
     date: getSelectedDate(),
     time,
     mealType: guessMealType(now.getHours()),
-    raw: saved.name,
-    items: saved.items.map(i => ({ name: i.name, calories: i.calories, source: 'saved' })),
+    raw: recipe.name,
+    items,
     totalCal,
-    source: 'saved',
+    source: 'recipe',
+    recipeId: recipe.id,
   };
   state.meals.push(meal);
   recordAction({ type: 'create-meal', meal });
   saveState();
-  toast(`Logged ${saved.name} (${totalCal} cal)`, { undo: true });
-  navigate('diary');
+  if (!opts.silent) {
+    toast(`Logged ${recipe.name} (${totalCal} cal)`, { undo: true });
+    navigate(currentView);
+  }
+  return meal;
 }
 
-function wireSavedMealsStrip() {
-  document.querySelectorAll('[data-saved-id]').forEach(btn => {
+/* Wire chip clicks + the manage button. Called whenever the chat strip rerenders. */
+function wireRecipesRow() {
+  document.querySelectorAll('[data-recipe-id]').forEach(btn => {
     btn.addEventListener('click', () => {
-      logSavedMeal(parseInt(btn.dataset.savedId));
+      logRecipeById(parseInt(btn.dataset.recipeId));
+    });
+  });
+  const manageBtn = document.getElementById('recipes-manage-btn');
+  if (manageBtn) manageBtn.addEventListener('click', openRecipesModal);
+}
+
+/* Recipes manager — list of all saved recipes with edit/delete + new-recipe.
+ * Opens from the + button in the chat strip's recipes row. */
+function openRecipesModal() {
+  const modal = document.getElementById('modal');
+  const recipes = (state.recipes || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  modal.className = 'modal modal-wide';
+  modal.innerHTML = `<div class="modal-h">Recipes</div>
+    <div class="modal-sub">Reusable ingredient lists you can log with one tap. Coach can also log them: "log my morning smoothie".</div>
+
+    <div class="recipes-list">
+      ${recipes.length === 0
+        ? `<div class="recipes-empty">No recipes yet. Tap "New recipe" below, or in chat say "save this as my morning smoothie" right after logging something.</div>`
+        : recipes.map(r => {
+            const total = recipeTotalCal(r);
+            const m = recipeMacros(r);
+            const ingredients = (r.items || []).map(i => i.name).filter(Boolean).join(', ');
+            return `<div class="recipe-row" data-recipe-row-id="${r.id}">
+              <div class="recipe-row-main">
+                <div class="recipe-row-head">
+                  <div class="recipe-row-name">${escapeAttr(r.name)}</div>
+                  <div class="recipe-row-cal">${total} <span class="cal-unit">cal</span></div>
+                </div>
+                <div class="recipe-row-ingredients">${escapeAttr(ingredients) || '<em>no ingredients</em>'}</div>
+                <div class="recipe-row-macros">P ${Math.round(m.protein)}g · C ${Math.round(m.carbs)}g · F ${Math.round(m.fat)}g · Fb ${Math.round(m.fiber)}g</div>
+              </div>
+              <div class="recipe-row-actions">
+                <button class="btn btn-secondary btn-sm" data-recipe-log="${r.id}" title="Log this recipe today">Log</button>
+                <button class="btn btn-secondary btn-sm" data-recipe-edit="${r.id}" title="Edit recipe">Edit</button>
+              </div>
+            </div>`;
+          }).join('')}
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="modal-cancel">Close</button>
+      <button class="btn btn-primary btn-block" id="recipes-new-btn">New recipe</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('recipes-new-btn').addEventListener('click', () => {
+    closeModal();
+    setTimeout(() => openRecipeEditModal(null), 120);
+  });
+  document.querySelectorAll('[data-recipe-edit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.recipeEdit);
+      closeModal();
+      setTimeout(() => openRecipeEditModal(id), 120);
+    });
+  });
+  document.querySelectorAll('[data-recipe-log]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.recipeLog);
+      closeModal();
+      logRecipeById(id);
     });
   });
 }
 
-/* Save the current parse draft as a reusable saved meal. Prompts for a name. */
+/* Recipe edit modal — name + ingredient rows. Pass null to create a new
+ * recipe; pass a recipe id to edit an existing one. Each ingredient row has
+ * name, portion, calories, and macros. Items can be added or removed. */
+function openRecipeEditModal(recipeId) {
+  const modal = document.getElementById('modal');
+  const isNew = recipeId == null;
+  const draft = isNew
+    ? { id: Date.now(), name: '', items: [], createdAt: todayISO(), updatedAt: todayISO() }
+    : JSON.parse(JSON.stringify((state.recipes || []).find(r => r.id === recipeId) || { id: Date.now(), name: '', items: [] }));
+
+  if (draft.items.length === 0 && isNew) {
+    // Seed one empty row so users see the format
+    draft.items.push({ name: '', portion: '', calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 });
+  }
+
+  function rowHtml(idx, item) {
+    return `<div class="recipe-edit-row" data-row-idx="${idx}">
+      <div class="recipe-edit-row-head">
+        <input class="recipe-edit-input recipe-edit-name" data-field="name" value="${escapeAttr(item.name || '')}" placeholder="Ingredient" />
+        <button class="recipe-edit-remove" data-remove-idx="${idx}" aria-label="Remove">×</button>
+      </div>
+      <div class="recipe-edit-row-grid">
+        <div class="recipe-edit-cell">
+          <label>Portion</label>
+          <input class="recipe-edit-input" data-field="portion" value="${escapeAttr(item.portion || '')}" placeholder="200g" />
+        </div>
+        <div class="recipe-edit-cell">
+          <label>Cal</label>
+          <input class="recipe-edit-input" type="number" data-field="calories" value="${item.calories || 0}" min="0" />
+        </div>
+        <div class="recipe-edit-cell">
+          <label>P</label>
+          <input class="recipe-edit-input" type="number" data-field="protein_g" value="${item.protein_g || 0}" min="0" />
+        </div>
+        <div class="recipe-edit-cell">
+          <label>C</label>
+          <input class="recipe-edit-input" type="number" data-field="carbs_g" value="${item.carbs_g || 0}" min="0" />
+        </div>
+        <div class="recipe-edit-cell">
+          <label>F</label>
+          <input class="recipe-edit-input" type="number" data-field="fat_g" value="${item.fat_g || 0}" min="0" />
+        </div>
+        <div class="recipe-edit-cell">
+          <label>Fb</label>
+          <input class="recipe-edit-input" type="number" data-field="fiber_g" value="${item.fiber_g || 0}" min="0" />
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function renderModal() {
+    const total = draft.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+    modal.className = 'modal modal-wide';
+    modal.innerHTML = `<div class="modal-h">${isNew ? 'New recipe' : 'Edit recipe'}</div>
+      <div class="modal-sub">Add each ingredient with its portion and macros. Tip: ask Coach in chat to add a recipe and it will fill in the macros for you.</div>
+
+      <div class="recipe-edit-section">
+        <label class="recipe-edit-label">Recipe name</label>
+        <input class="recipe-edit-input recipe-edit-fullname" id="recipe-edit-name" value="${escapeAttr(draft.name)}" placeholder="e.g. Morning smoothie" />
+      </div>
+
+      <div class="recipe-edit-section">
+        <div class="recipe-edit-section-head">
+          <label class="recipe-edit-label">Ingredients</label>
+          <div class="recipe-edit-total">${total} cal total</div>
+        </div>
+        <div id="recipe-edit-items">
+          ${draft.items.map((item, idx) => rowHtml(idx, item)).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm recipe-edit-add" id="recipe-add-row">+ Add ingredient</button>
+      </div>
+
+      <div class="modal-actions">
+        ${isNew ? '' : '<button class="btn btn-secondary btn-block recipe-edit-delete" id="recipe-delete-btn">Delete recipe</button>'}
+        <button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary btn-block" id="recipe-save-btn">${isNew ? 'Create recipe' : 'Save changes'}</button>
+      </div>`;
+    wireModal();
+  }
+
+  function syncDraftFromInputs() {
+    draft.name = (document.getElementById('recipe-edit-name').value || '').trim();
+    document.querySelectorAll('.recipe-edit-row').forEach(row => {
+      const idx = parseInt(row.dataset.rowIdx);
+      if (!draft.items[idx]) return;
+      row.querySelectorAll('[data-field]').forEach(input => {
+        const f = input.dataset.field;
+        if (f === 'name' || f === 'portion') {
+          draft.items[idx][f] = (input.value || '').trim();
+        } else {
+          draft.items[idx][f] = parseFloat(input.value) || 0;
+        }
+      });
+    });
+  }
+
+  function wireModal() {
+    document.getElementById('modal-cancel').addEventListener('click', () => {
+      closeModal();
+      setTimeout(openRecipesModal, 120);
+    });
+    document.getElementById('recipe-add-row').addEventListener('click', () => {
+      syncDraftFromInputs();
+      draft.items.push({ name: '', portion: '', calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0 });
+      renderModal();
+    });
+    document.querySelectorAll('[data-remove-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncDraftFromInputs();
+        const idx = parseInt(btn.dataset.removeIdx);
+        draft.items.splice(idx, 1);
+        renderModal();
+      });
+    });
+    // Live total update on cal change
+    document.querySelectorAll('[data-field="calories"]').forEach(input => {
+      input.addEventListener('input', () => {
+        syncDraftFromInputs();
+        const total = draft.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
+        const totalEl = document.querySelector('.recipe-edit-total');
+        if (totalEl) totalEl.textContent = `${total} cal total`;
+      });
+    });
+    const delBtn = document.getElementById('recipe-delete-btn');
+    if (delBtn) delBtn.addEventListener('click', () => {
+      if (!confirm(`Delete recipe "${draft.name}"? This can't be undone.`)) return;
+      state.recipes = (state.recipes || []).filter(r => r.id !== draft.id);
+      saveState();
+      closeModal();
+      toast(`Deleted "${draft.name}"`);
+      setTimeout(openRecipesModal, 120);
+      navigate(currentView);
+    });
+    document.getElementById('recipe-save-btn').addEventListener('click', () => {
+      syncDraftFromInputs();
+      if (!draft.name) { toast('Give the recipe a name first'); return; }
+      // Strip empty ingredient rows
+      draft.items = draft.items.filter(i => i.name);
+      if (draft.items.length === 0) { toast('Add at least one ingredient'); return; }
+      draft.updatedAt = todayISO();
+      if (!Array.isArray(state.recipes)) state.recipes = [];
+      const existingIdx = state.recipes.findIndex(r => r.id === draft.id);
+      if (existingIdx >= 0) {
+        state.recipes[existingIdx] = draft;
+      } else {
+        draft.createdAt = draft.createdAt || todayISO();
+        state.recipes.push(draft);
+      }
+      saveState();
+      closeModal();
+      toast(isNew ? `Recipe "${draft.name}" created` : `Recipe "${draft.name}" updated`);
+      setTimeout(openRecipesModal, 120);
+      navigate(currentView);
+    });
+  }
+
+  document.getElementById('modal-backdrop').classList.add('open');
+  renderModal();
+}
+
+/* ===== Legacy aliases — the old log view still references these in describe-mode. ===== */
+function renderSavedMealsStrip() { return ''; /* deprecated — recipes row in chat takes its place */ }
+function wireSavedMealsStrip()   { /* no-op for legacy callers */ }
 function saveDraftAsSavedMeal() {
+  // Old local-parser path — pre-Coach. Convert the local draft into a recipe.
   if (!todayParseDraft || !todayParseDraft.items.length) return;
-  const defaultName = todayParseDraft.text ? todayParseDraft.text.slice(0, 40) : 'My meal';
-  const name = window.prompt('Name this meal (e.g. "My breakfast"):', defaultName);
+  const defaultName = todayParseDraft.text ? todayParseDraft.text.slice(0, 40) : 'My recipe';
+  const name = window.prompt('Name this recipe (e.g. "My breakfast"):', defaultName);
   if (!name || !name.trim()) return;
   const trimmed = name.trim().slice(0, 60);
-  if (!Array.isArray(state.savedMeals)) state.savedMeals = [];
-  state.savedMeals.push({
+  if (!Array.isArray(state.recipes)) state.recipes = [];
+  state.recipes.push({
     id: Date.now(),
     name: trimmed,
-    items: todayParseDraft.items.map(i => ({ name: i.name, calories: parseInt(i.calories) || 0 })),
+    items: todayParseDraft.items.map(i => ({
+      name: i.name, portion: '',
+      calories: parseInt(i.calories) || 0,
+      protein_g: 0, carbs_g: 0, fat_g: 0, fiber_g: 0,
+    })),
     createdAt: todayISO(),
+    updatedAt: todayISO(),
   });
   saveState();
-  toast(`Saved "${trimmed}". Tap the chip to log it again.`);
+  toast(`Saved "${trimmed}" as a recipe.`);
 }
 
 /* Log a single food (from the search dropdown). Same shape as logRecentFood,
@@ -4547,7 +4937,7 @@ function openSettings() {
   const heightFt = Math.floor(state.user.heightInches / 12);
   const heightIn = state.user.heightInches % 12;
   const sexText = state.user.sex === 'F' ? 'female' : 'male';
-  const savedMeals = state.savedMeals || [];
+  const recipes = state.recipes || [];
 
   modal.className = 'modal modal-wide';
   modal.innerHTML = `<div class="modal-h">Settings</div>
@@ -4592,21 +4982,13 @@ function openSettings() {
     <div class="settings-section">
       <div class="settings-section-eyebrow">Your data</div>
 
-      ${savedMeals.length ? `
-        <div class="settings-item-stack">
-          <div class="settings-item-label">Saved meals · ${savedMeals.length}</div>
-          <div class="settings-saved-list">${savedMeals.map(m => {
-            const total = m.items.reduce((s,x)=>s+(parseInt(x.calories)||0),0);
-            return `<div class="settings-saved-row">
-              <div class="settings-saved-info">
-                <div class="settings-saved-name">${escapeAttr(m.name)} <span class="settings-saved-cal">${total} cal</span></div>
-                <div class="settings-saved-detail">${escapeAttr(m.items.map(i => i.name).join(', '))}</div>
-              </div>
-              <button class="settings-saved-delete" data-delete-saved="${m.id}" title="Delete">×</button>
-            </div>`;
-          }).join('')}</div>
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">Recipes · ${recipes.length}</div>
+          <div class="settings-item-detail">Reusable ingredient lists you can log with one tap.</div>
         </div>
-      ` : ''}
+        <button class="btn btn-secondary btn-sm" id="settings-recipes-btn">Manage</button>
+      </div>
 
       <div class="settings-item-stack">
         <div class="settings-item-head">
@@ -4692,17 +5074,10 @@ function openSettings() {
     rateSlider.addEventListener('change', (e) => { state.user.targetLossRate = parseInt(e.target.value) / 100; saveState(); toast(`Target rate: ${state.user.targetLossRate.toFixed(2)} lb/wk`); });
   }
   document.getElementById('settings-save-goal').addEventListener('click', () => { const v = parseFloat(document.getElementById('settings-goal').value); if (isNaN(v) || v < 50 || v > 500) return toast('Goal weight 50-500 lb'); state.user.goalWeight = v; saveState(); closeModal(); toast(`Goal weight: ${v} lb`); navigate(currentView); });
-  document.querySelectorAll('[data-delete-saved]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = parseInt(btn.dataset.deleteSaved);
-      const sm = (state.savedMeals || []).find(m => m.id === id);
-      if (!sm) return;
-      if (!confirm(`Delete saved meal "${sm.name}"?`)) return;
-      state.savedMeals = state.savedMeals.filter(m => m.id !== id);
-      saveState();
-      closeModal();
-      openSettings(); // reopen with refreshed list
-    });
+  const recipesBtn = document.getElementById('settings-recipes-btn');
+  if (recipesBtn) recipesBtn.addEventListener('click', () => {
+    closeModal();
+    setTimeout(openRecipesModal, 120);
   });
 }
 
@@ -5268,7 +5643,7 @@ function completeOnboarding() {
   state = {
     user: { name: d.name || 'You', sex: d.sex, age: d.age, heightInches: d.heightFt * 12 + d.heightIn, startWeight: d.startWeight, goalWeight: d.goalWeight, startDate: today, scalePref: d.scalePref, activityLevel: d.activityLevel || 'light', trackerAccuracy: d.trackerAccuracy != null ? d.trackerAccuracy : 0.70, foodAccuracy: d.foodAccuracy != null ? d.foodAccuracy : 0.85, targetLossRate: d.targetLossRate != null ? d.targetLossRate : 1.0 },
     weights: [{ date: today, weight: d.startWeight }],
-    meals: [], exercises: [], dayNotes: {}, savedMeals: [], water: [], onboarded: true, isDemo: false,
+    meals: [], exercises: [], dayNotes: {}, recipes: [], water: [], onboarded: true, isDemo: false,
   };
   saveState();
   clearChatHistory();
