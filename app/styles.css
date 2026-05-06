@@ -4053,13 +4053,16 @@ input[type="range"]::-moz-range-thumb {
     overflow-y: visible;
   }
 
-  /* Mobile tab visibility — hide all tab content blocks except the active one */
-  body.mtab-coach   [data-mobile-tab="results"],
-  body.mtab-coach   [data-mobile-tab="diary"]   { display: none; }
-  body.mtab-diary   [data-mobile-tab="coach"],
-  body.mtab-diary   [data-mobile-tab="results"] { display: none; }
-  body.mtab-results [data-mobile-tab="coach"],
-  body.mtab-results [data-mobile-tab="diary"]   { display: none; }
+  /* Mobile tab visibility — hide all tab content blocks except the active one.
+     Scoped to direct children of #view-container and #right-panel-content so
+     the rules don't accidentally hide nav buttons in the drawer that happen
+     to share the same data-mobile-tab attribute. */
+  body.mtab-coach   #view-container > [data-mobile-tab="results"],
+  body.mtab-coach   #right-panel-content > [data-mobile-tab="diary"]   { display: none; }
+  body.mtab-diary   #view-container > [data-mobile-tab="coach"],
+  body.mtab-diary   #view-container > [data-mobile-tab="results"]      { display: none; }
+  body.mtab-results #view-container > [data-mobile-tab="coach"],
+  body.mtab-results #right-panel-content > [data-mobile-tab="diary"]   { display: none; }
 
   /* Hamburger button — leftmost element in the mobile sidebar strip */
   .hamburger-btn {
