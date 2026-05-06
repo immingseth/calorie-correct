@@ -13,7 +13,7 @@
  * get cleaned up on the next install.
  */
 
-const CACHE_VERSION = 'cc-shell-v5';
+const CACHE_VERSION = 'cc-shell-v6';
 const APP_SHELL = [
   '/app/',
   '/app/index.html',
@@ -22,6 +22,7 @@ const APP_SHELL = [
   '/app/chart.umd.min.js',
   '/app/cc-logo.png',
   '/app/favicon.png',
+  '/app/mobile-icon.png',
   '/app/manifest.json',
 ];
 
