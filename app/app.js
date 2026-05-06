@@ -2554,8 +2554,8 @@ function renderChatStrip(opts) {
   const visibleTurns = expandedHistory ? chatHistory : chatHistory.slice(-1);
   const hiddenCount = totalTurns - visibleTurns.length;
 
-  const renderTurn = (t) => {
-    const userBubble = (t.greeting || !t.user) ? '' : `
+  const renderTurn = (t, coachOnly) => {
+    const userBubble = (coachOnly || t.greeting || !t.user) ? '' : `
       <div class="chat-turn-user">
         <span class="chat-turn-label">You</span>
         <span class="chat-turn-text">${escapeAttr(t.user)}</span>
@@ -2571,7 +2571,10 @@ function renderChatStrip(opts) {
     return `<div class="chat-turn">${userBubble}${coachBubble}</div>`;
   };
 
-  const turnsHtml = visibleTurns.map(renderTurn).join('');
+  // When collapsed, only show Coach's reply (no "You" bubble) — the user's
+  // text is still in the input field above and isn't useful as context once
+  // they've already seen Coach's response.
+  const turnsHtml = visibleTurns.map(t => renderTurn(t, !expandedHistory)).join('');
 
   // Show toggle whenever there's more than one turn in the session, regardless
   // of current expanded state — so collapsed users can expand, and expanded
