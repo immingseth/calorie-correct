@@ -2174,7 +2174,7 @@ function renderChatStrip(opts) {
       <div class="home-input-card chat-input-card">
         <div class="home-input-wrap">
           <input class="home-input" id="chat-input" placeholder="${placeholder}" autocomplete="off" />
-          <button class="ai-input-btn" disabled title="Voice — coming soon" aria-label="Voice (coming soon)">
+          <button class="ai-input-btn" id="chat-mic-btn" title="Voice input" aria-label="Voice input">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           </button>
           <button class="ai-input-btn" disabled title="Photo — coming soon" aria-label="Photo (coming soon)">
@@ -2198,10 +2198,99 @@ function renderChatStrip(opts) {
 }
 
 /* Wire chat input + chips. Called after each view that includes renderChatStrip(). */
+/* Voice input via Web Speech API. Click mic → start listening → speech
+ * transcribes into the chat input. Click again (or stop talking) to commit.
+ * The transcript drops into the input field; user reviews before sending so
+ * voice mistakes don't silently log a wrong meal. */
+let speechRecognition = null;       // active recognition instance, if any
+let speechActiveButton = null;      // the mic button currently in the listening state
+
+function wireMicButton(inputEl) {
+  const micBtn = document.getElementById('chat-mic-btn');
+  if (!micBtn) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    // Browser doesn't support speech recognition (mainly Firefox). Hide the button.
+    micBtn.style.display = 'none';
+    return;
+  }
+
+  micBtn.addEventListener('click', () => {
+    // If we're already listening, stop.
+    if (speechRecognition) {
+      try { speechRecognition.stop(); } catch (e) { /* no-op */ }
+      return;
+    }
+    startSpeechRecognition(SR, micBtn, inputEl);
+  });
+}
+
+function startSpeechRecognition(SR, micBtn, inputEl) {
+  const recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = true;     // show partial transcript while user speaks
+  recognition.continuous = false;        // single utterance per click
+  recognition.maxAlternatives = 1;
+
+  // Snapshot the current input so we can append rather than overwrite
+  const baseValue = inputEl.value;
+  let finalText = '';
+
+  micBtn.classList.add('listening');
+  speechRecognition = recognition;
+  speechActiveButton = micBtn;
+
+  recognition.addEventListener('result', (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) {
+        finalText += r[0].transcript;
+      } else {
+        interim += r[0].transcript;
+      }
+    }
+    // Live update: show what's heard so far in the input field
+    const combined = (finalText + interim).trim();
+    inputEl.value = baseValue ? `${baseValue} ${combined}` : combined;
+  });
+
+  recognition.addEventListener('error', (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      toast('Microphone permission denied. Allow mic access in your browser to use voice.');
+    } else if (e.error === 'no-speech') {
+      // User clicked but didn't say anything — silent fail
+    } else {
+      toast(`Voice input error: ${e.error}`);
+    }
+  });
+
+  recognition.addEventListener('end', () => {
+    micBtn.classList.remove('listening');
+    speechRecognition = null;
+    speechActiveButton = null;
+    // Focus the input so user can verify and send
+    inputEl.focus();
+  });
+
+  try {
+    recognition.start();
+  } catch (e) {
+    // Already-started or other state error — clean up
+    micBtn.classList.remove('listening');
+    speechRecognition = null;
+    speechActiveButton = null;
+  }
+}
+
 function wireChatStrip() {
   const inp = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
   if (!inp || !sendBtn) return;
+
+  // Voice input — wire the mic button if the browser supports Web Speech API.
+  // Hide it on browsers that don't (mainly Firefox).
+  wireMicButton(inp);
 
   const submit = () => {
     const text = inp.value.trim();
