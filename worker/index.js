@@ -233,6 +233,131 @@ Output rules:
       return jsonResponse({ greeting, usage: data.usage || null }, 200, cors);
     }
 
+    // Photo meal logging — accepts a base64 image, runs Claude vision,
+    // returns the same structured meal JSON as /api/coach.
+    if (url.pathname === '/api/parse-meal-photo' && request.method === 'POST') {
+      let body;
+      try { body = await request.json(); }
+      catch (e) { return jsonResponse({ error: 'Invalid JSON' }, 400, cors); }
+
+      const imageData = body.imageData;
+      const imageType = body.imageType || 'image/jpeg';
+      if (!imageData || typeof imageData !== 'string') {
+        return jsonResponse({ error: 'imageData (base64) is required' }, 400, cors);
+      }
+      // Strip a possible data URL prefix the frontend might leave on
+      const base64 = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
+      const userContext = body.userContext || null;
+
+      const photoSystem = `You are Coach inside Calorie Correct, looking at a photo of food the user just ate or is about to eat. Identify what's on the plate and estimate portions and macros.
+
+${SYSTEM_PROMPT.split('RESPONSE FORMAT')[1] ? '' : ''}
+
+RESPONSE FORMAT — return a single valid JSON object:
+{
+  "intent": "meal" | "ambiguous",
+  "confidence": <0.0-1.0>,
+  "summary": "<your conversational reply>",
+  "items": [{ "name", "portion", "calories", "protein_g", "carbs_g", "fat_g", "fiber_g" }, ...]
+}
+
+Photo-specific guidance:
+- Estimate portions from visual cues (plate size, item proportions, common serving sizes).
+- It's fine to not be perfectly accurate — calibration absorbs imprecision. Don't refuse to estimate just because the photo isn't perfect.
+- If the photo doesn't show food (e.g. blurry, wrong subject), set intent to "ambiguous" with a brief summary asking what they meant to log.
+- For brand voice: matter-of-fact, no judgment, no pep talks.
+
+SUMMARY for photo meals:
+- Briefly describe what you see ("Looks like grilled chicken, rice, and steamed broccoli — about 620 cal.").
+- Reference total cal and notable macros (high protein, high fiber).
+- If user has remaining cal info available, you can mention it.
+- 1-2 sentences total.`;
+
+      const messages = [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: imageType,
+                data: base64,
+              },
+            },
+            { type: 'text', text: 'What did I eat? Estimate calories and macros.' },
+          ],
+        },
+        { role: 'assistant', content: '{' },
+      ];
+
+      let system = photoSystem;
+      if (userContext) {
+        system += `\n\nUser context:\n${JSON.stringify(userContext, null, 2)}`;
+      }
+
+      let anthropicResponse;
+      try {
+        anthropicResponse = await fetch(ANTHROPIC_API_URL, {
+          method: 'POST',
+          headers: {
+            'x-api-key': env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            max_tokens: MAX_TOKENS,
+            system,
+            messages,
+          }),
+        });
+      } catch (e) {
+        return jsonResponse({ error: 'Network error reaching Anthropic.' }, 502, cors);
+      }
+
+      if (!anthropicResponse.ok) {
+        const text = await anthropicResponse.text();
+        return jsonResponse(
+          { error: 'Anthropic API error', status: anthropicResponse.status, detail: text },
+          502, cors
+        );
+      }
+
+      const data = await anthropicResponse.json();
+      const rawText = (data.content || [])
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('')
+        .trim();
+
+      const parsed = parseClaudeJson(rawText);
+      if (!parsed) {
+        return jsonResponse(
+          {
+            intent: 'ambiguous',
+            confidence: 0.4,
+            summary: rawText || "I couldn't read that photo. Try a different angle?",
+            items: [],
+            usage: data.usage || null,
+            _parseError: true,
+          },
+          200, cors
+        );
+      }
+
+      return jsonResponse(
+        {
+          intent: parsed.intent || 'meal',
+          confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.7,
+          summary: parsed.summary || '',
+          items: Array.isArray(parsed.items) ? parsed.items : [],
+          usage: data.usage || null,
+        },
+        200, cors
+      );
+    }
+
     if (url.pathname === '/api/coach' && request.method === 'POST') {
       let body;
       try { body = await request.json(); }

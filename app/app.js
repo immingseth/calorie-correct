@@ -2177,9 +2177,10 @@ function renderChatStrip(opts) {
           <button class="ai-input-btn" id="chat-mic-btn" title="Voice input" aria-label="Voice input">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           </button>
-          <button class="ai-input-btn" disabled title="Photo — coming soon" aria-label="Photo (coming soon)">
+          <button class="ai-input-btn" id="chat-photo-btn" title="Log meal from photo" aria-label="Log meal from photo">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
+          <input type="file" id="chat-photo-input" accept="image/*" capture="environment" style="display: none;" />
           <button class="btn btn-primary home-input-send" id="chat-send">Send</button>
         </div>
 
@@ -2283,6 +2284,133 @@ function startSpeechRecognition(SR, micBtn, inputEl) {
   }
 }
 
+/* Compress an image File to a base64 data URL with max edge 1024px @ JPEG 0.85.
+ * Keeps photo upload payloads small (~100-300KB typical) and well under any
+ * Worker / API request size limits. Returns { dataUrl, mediaType } or rejects. */
+function compressImage(file, maxEdge = 1024, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Could not decode image.'));
+      img.onload = () => {
+        const ratio = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const w = Math.round(img.width * ratio);
+        const h = Math.round(img.height * ratio);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        // Always output JPEG — smaller than PNG for photos
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({ dataUrl, mediaType: 'image/jpeg' });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* Wire the camera button. Click → file picker → compress → send to Worker.
+ * Same chat-bubble pattern as text/voice: pending bubble while processing,
+ * resolves to a meal log (with macros) or an ambiguous-question response. */
+function wirePhotoButton() {
+  const photoBtn = document.getElementById('chat-photo-btn');
+  const fileInput = document.getElementById('chat-photo-input');
+  if (!photoBtn || !fileInput) return;
+
+  photoBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    fileInput.value = ''; // reset so the same file can be picked again
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast('That file is not an image.');
+      return;
+    }
+
+    photoBtn.classList.add('loading');
+
+    // Add a pending turn so the user sees the typing indicator immediately
+    const turnId = addChatTurn({
+      user: '📷 Photo',
+      coach: '',
+      kind: 'coach',
+      pending: true,
+    });
+    navigate(currentView);
+
+    try {
+      const { dataUrl, mediaType } = await compressImage(file);
+      const remote = await parseMealPhotoRemote(dataUrl, mediaType);
+
+      if (remote && remote.intent === 'meal' && remote.confidence >= 0.5 && Array.isArray(remote.items) && remote.items.length > 0) {
+        const now = new Date();
+        const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const items = remote.items.map(it => ({
+          name: it.name || 'item',
+          portion: it.portion || '',
+          calories: parseInt(it.calories) || 0,
+          protein_g: parseFloat(it.protein_g) || 0,
+          carbs_g: parseFloat(it.carbs_g) || 0,
+          fat_g: parseFloat(it.fat_g) || 0,
+          fiber_g: parseFloat(it.fiber_g) || 0,
+          source: 'claude-vision',
+        }));
+        const totalCal = items.reduce((s, x) => s + x.calories, 0);
+        const meal = {
+          id: Date.now(),
+          date: getSelectedDate(),
+          time,
+          mealType: guessMealType(now.getHours()),
+          raw: 'photo',
+          items,
+          totalCal,
+          source: 'claude-vision',
+        };
+        state.meals.push(meal);
+        recordAction({ type: 'create-meal', meal });
+        saveState();
+        resolveChatTurn(turnId, remote.summary || coachLogResponse(meal, getSelectedDate()), 'log');
+      } else if (remote && remote.summary) {
+        resolveChatTurn(turnId, remote.summary, 'coach');
+      } else {
+        resolveChatTurn(turnId, "I couldn't quite read that photo. Try a different angle, or just describe the meal in chat.", 'error');
+      }
+    } catch (err) {
+      resolveChatTurn(turnId, "Photo upload failed. Try again, or describe the meal in chat.", 'error');
+    } finally {
+      photoBtn.classList.remove('loading');
+      navigate(currentView);
+    }
+  });
+}
+
+/* Async — POST a photo to the Worker for parsing. Returns the structured
+ * response or null on failure. */
+async function parseMealPhotoRemote(dataUrl, mediaType) {
+  if (!WORKER_URL) return null;
+  try {
+    const response = await fetch(WORKER_URL + '/api/parse-meal-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageData: dataUrl,
+        imageType: mediaType,
+        userContext: buildUserContext(state),
+      }),
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (!data || !data.intent) throw new Error('Bad response shape');
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
 function wireChatStrip() {
   const inp = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
@@ -2291,6 +2419,9 @@ function wireChatStrip() {
   // Voice input — wire the mic button if the browser supports Web Speech API.
   // Hide it on browsers that don't (mainly Firefox).
   wireMicButton(inp);
+
+  // Photo input — file picker + compress + Worker call
+  wirePhotoButton();
 
   const submit = () => {
     const text = inp.value.trim();

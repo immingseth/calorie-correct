@@ -865,6 +865,27 @@ html, body {
   50%      { box-shadow: 0 0 0 6px rgba(182, 93, 79, 0); }
 }
 
+/* Loading state — used while a photo is being uploaded + parsed */
+.ai-input-btn.loading {
+  background: var(--primary-soft);
+  pointer-events: none;
+  position: relative;
+  color: transparent;
+}
+.ai-input-btn.loading::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--primary);
+  border-top-color: transparent;
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Single-column on narrow screens */
 @media (max-width: 900px) {
   .diary-grid { grid-template-columns: 1fr; gap: 20px; }
