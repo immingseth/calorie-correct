@@ -482,35 +482,38 @@ const WORKER_URL = 'https://calorie-correct-coach.calorie-correct.workers.dev';
  * on the same tab. Desktop ignores this. */
 const STORAGE_MOBILE_TAB_KEY = 'realcal_mobile_tab';
 const MOBILE_BREAKPOINT = 900;
-const VALID_MOBILE_TABS = ['coach', 'diary', 'results'];
+/* Two mobile tabs: Diary (default) and Results.
+ * Coach chat is pinned at the bottom of the viewport on both tabs — so the
+ * user can always log a meal or ask a question without switching views. */
+const VALID_MOBILE_TABS = ['diary', 'results'];
 
 function getMobileTab() {
   try {
     const t = localStorage.getItem(STORAGE_MOBILE_TAB_KEY);
-    return VALID_MOBILE_TABS.includes(t) ? t : 'coach';
-  } catch (e) { return 'coach'; }
+    return VALID_MOBILE_TABS.includes(t) ? t : 'diary';
+  } catch (e) { return 'diary'; }
 }
 function setMobileTab(tab) {
-  if (!VALID_MOBILE_TABS.includes(tab)) tab = 'coach';
+  if (!VALID_MOBILE_TABS.includes(tab)) tab = 'diary';
   try { localStorage.setItem(STORAGE_MOBILE_TAB_KEY, tab); } catch (e) {}
   applyMobileTab(tab);
 }
 function applyMobileTab(tab) {
   // Drive everything off body classes — CSS does the show/hide
   const cls = document.body.classList;
+  // Clear any old coach class that might be lingering from previous versions
+  cls.remove('mtab-coach');
   VALID_MOBILE_TABS.forEach(t => cls.remove('mtab-' + t));
   cls.add('mtab-' + tab);
   // Update visual state of tab bar buttons
   document.querySelectorAll('.m-tab[data-mobile-tab]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mobileTab === tab);
   });
-  // If switching TO Coach tab and the chat history exists, scroll to bottom
-  if (tab === 'coach') {
-    setTimeout(() => {
-      const histEl = document.getElementById('chat-history');
-      if (histEl) histEl.scrollTop = histEl.scrollHeight;
-    }, 50);
-  }
+  // Always scroll the persistent chat history to the latest turn after swap
+  setTimeout(() => {
+    const histEl = document.getElementById('chat-history');
+    if (histEl) histEl.scrollTop = histEl.scrollHeight;
+  }, 50);
 }
 function wireMobileTabBar() {
   document.querySelectorAll('.m-tab[data-mobile-tab]').forEach(btn => {
