@@ -28,6 +28,11 @@
 
   <!-- ================ Left sidebar — profile + weigh-in ================ -->
   <aside class="sidebar">
+    <!-- Hamburger menu (mobile only) — opens nav drawer -->
+    <button class="hamburger-btn" id="hamburger-btn" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+
     <button class="profile-btn" id="profile-btn">
       <div class="profile-avatar" id="user-avatar">S</div>
       <div class="profile-info">
@@ -57,8 +62,17 @@
     </div>
   </aside>
 
-  <!-- ================ Mobile bottom tab bar (only visible <900px) ================ -->
-  <nav class="mobile-tab-bar" id="mobile-tab-bar">
+</div>
+
+<!-- Mobile nav drawer — opened by hamburger button (mobile only) -->
+<div class="mobile-drawer-backdrop" id="mobile-drawer-backdrop">
+  <nav class="mobile-drawer" id="mobile-drawer">
+    <div class="mobile-drawer-header">
+      <span class="mobile-drawer-title">Menu</span>
+      <button class="mobile-drawer-close" id="mobile-drawer-close" aria-label="Close menu">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
+      </button>
+    </div>
     <button class="m-tab" data-mobile-tab="coach">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span>Coach</span>
@@ -72,7 +86,6 @@
       <span>Results</span>
     </button>
   </nav>
-
 </div>
 
 <!-- Modal layer -->

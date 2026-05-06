@@ -3993,11 +3993,13 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ===========================================================
-   Mobile bottom tab bar — visible only below 900px viewport.
-   On desktop, all three content blocks render in their columns.
-   On mobile, only the active tab's content shows.
+   Mobile nav — hamburger + slide-in drawer (visible only <900px).
+   On desktop, all three content blocks render in their columns; the
+   hamburger is hidden. On mobile, hamburger toggles a drawer with
+   Coach/Diary/Results buttons that swap which tab is shown.
    =========================================================== */
-.mobile-tab-bar { display: none; }
+.hamburger-btn { display: none; }
+.mobile-drawer-backdrop { display: none; }
 
 /* Tablet and below — collapse to single column with bottom tab nav.
    Sidebar becomes a thin top strip with profile + weigh-in.
@@ -4059,40 +4061,120 @@ input[type="range"]::-moz-range-thumb {
   body.mtab-results [data-mobile-tab="coach"],
   body.mtab-results [data-mobile-tab="diary"]   { display: none; }
 
-  /* Mobile tab bar — fixed at bottom, full width */
-  .mobile-tab-bar {
-    display: flex;
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
+  /* Hamburger button — leftmost element in the mobile sidebar strip */
+  .hamburger-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
     background: var(--card);
-    border-top: 0.5px solid var(--border);
-    z-index: 50;
-    padding: 8px 4px calc(10px + env(safe-area-inset-bottom, 0px));
-    padding-left: calc(4px + env(safe-area-inset-left, 0px));
-    padding-right: calc(4px + env(safe-area-inset-right, 0px));
-    box-shadow: 0 -4px 12px rgba(60, 50, 40, 0.04);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-soft);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.12s ease, color 0.12s ease;
   }
-  .m-tab {
-    flex: 1;
+  .hamburger-btn:hover,
+  .hamburger-btn:active {
+    background: var(--primary-softer);
+    color: var(--primary-dark);
+  }
+
+  /* Slide-in drawer — opens when hamburger is tapped. Covers ~70% of the
+     screen width with a tappable backdrop on the right to close. */
+  .mobile-drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(44, 40, 38, 0.45);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .mobile-drawer-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .mobile-drawer {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: min(280px, 78vw);
+    background: var(--bg-warm);
+    border-right: 0.5px solid var(--border);
+    box-shadow: 4px 0 16px rgba(60, 50, 40, 0.12);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
     display: flex;
     flex-direction: column;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .mobile-drawer-backdrop.open .mobile-drawer {
+    transform: translateX(0);
+  }
+  .mobile-drawer-header {
+    display: flex;
     align-items: center;
-    gap: 3px;
-    padding: 6px 4px;
+    justify-content: space-between;
+    padding: 18px 20px 14px;
+    border-bottom: 0.5px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .mobile-drawer-title {
+    font-size: 11px;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
     color: var(--muted);
-    font-size: 10.5px;
     font-weight: 600;
-    letter-spacing: 0.4px;
+  }
+  .mobile-drawer-close {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+  }
+  .mobile-drawer-close:hover { background: var(--bg-soft); color: var(--text); }
+
+  /* Drawer items — each tab as a full-width row */
+  .mobile-drawer .m-tab {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    color: var(--text-soft);
+    font-size: 15px;
+    font-weight: 500;
     background: none;
     border: none;
     cursor: pointer;
-    transition: color 0.12s ease;
+    text-align: left;
+    transition: background 0.12s ease, color 0.12s ease;
+    width: 100%;
   }
-  .m-tab svg { stroke: currentColor; fill: none; }
-  .m-tab.active { color: var(--primary-dark); }
-
-  /* Push content above the tab bar so nothing gets clipped */
-  .right-panel { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-drawer .m-tab svg {
+    stroke: currentColor;
+    fill: none;
+    flex-shrink: 0;
+  }
+  .mobile-drawer .m-tab:hover,
+  .mobile-drawer .m-tab:active {
+    background: var(--primary-softer);
+    color: var(--primary-dark);
+  }
+  .mobile-drawer .m-tab.active {
+    color: var(--primary-dark);
+    background: var(--primary-soft);
+  }
 
   /* === Coach tab — pin chat input at bottom (above tab bar) ===
      The chat-strip takes the full available content height; chat-history
@@ -4133,20 +4215,21 @@ input[type="range"]::-moz-range-thumb {
   body.mtab-coach .chat-input-card,
   body.mtab-coach .chat-strip-big .chat-input-card {
     flex-shrink: 0;
-    margin-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    margin-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
   /* Hide the example-prompts hint on mobile to save vertical space */
   body.mtab-coach .chat-hint { display: none; }
   /* Hide the recent-foods chips on mobile too — they're a nice-to-have */
   body.mtab-coach .home-chips { display: none; }
 
-  /* === Results / Diary tabs — normal scroll, pad-bottom for tab bar === */
+  /* === Results / Diary tabs — normal scroll, breathing room at bottom === */
   body.mtab-results .main,
   body.mtab-diary .main {
-    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   }
   body.mtab-results .right-panel { display: none; }
   body.mtab-diary .main { display: none; }
+  body.mtab-diary .right-panel { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
 
   /* Adjustments for content sizing on small screens */
   .view-title { font-size: 28px; letter-spacing: -0.7px; }

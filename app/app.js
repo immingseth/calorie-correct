@@ -514,7 +514,37 @@ function applyMobileTab(tab) {
 }
 function wireMobileTabBar() {
   document.querySelectorAll('.m-tab[data-mobile-tab]').forEach(btn => {
-    btn.addEventListener('click', () => setMobileTab(btn.dataset.mobileTab));
+    btn.addEventListener('click', () => {
+      setMobileTab(btn.dataset.mobileTab);
+      closeMobileDrawer();
+    });
+  });
+}
+
+/* Hamburger menu — opens/closes the slide-in drawer (mobile only) */
+function openMobileDrawer() {
+  const backdrop = document.getElementById('mobile-drawer-backdrop');
+  if (backdrop) backdrop.classList.add('open');
+}
+function closeMobileDrawer() {
+  const backdrop = document.getElementById('mobile-drawer-backdrop');
+  if (backdrop) backdrop.classList.remove('open');
+}
+function wireHamburger() {
+  const btn = document.getElementById('hamburger-btn');
+  const backdrop = document.getElementById('mobile-drawer-backdrop');
+  const closeBtn = document.getElementById('mobile-drawer-close');
+  if (btn) btn.addEventListener('click', openMobileDrawer);
+  if (closeBtn) closeBtn.addEventListener('click', closeMobileDrawer);
+  if (backdrop) {
+    backdrop.addEventListener('click', (e) => {
+      // Close only when tapping the backdrop itself, not the drawer panel
+      if (e.target === backdrop) closeMobileDrawer();
+    });
+  }
+  // ESC closes the drawer
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMobileDrawer();
   });
 }
 const TODAY_OVERRIDE = null; // production: use real today's date
@@ -4620,8 +4650,9 @@ function init() {
   document.getElementById('weighin-btn').addEventListener('click', openWeighIn);
   document.getElementById('profile-btn').addEventListener('click', openSettings);
 
-  // Mobile tab bar — wire clicks and apply the saved active tab on load
+  // Mobile nav — hamburger opens drawer, drawer tabs swap content
   wireMobileTabBar();
+  wireHamburger();
   applyMobileTab(getMobileTab());
   document.getElementById('modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'modal-backdrop') closeModal(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
