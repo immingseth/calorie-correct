@@ -477,6 +477,46 @@ const STORAGE_CHAT_KEY = 'realcal_chat_v1'; // last conversation turn — persis
 /* Cloudflare Worker that proxies chat to Claude. Set to null to fall back to
  * the local placeholder responses (offline mode / Worker down). */
 const WORKER_URL = 'https://calorie-correct-coach.calorie-correct.workers.dev';
+
+/* Mobile tab — persists which tab the user last had active so reloads land
+ * on the same tab. Desktop ignores this. */
+const STORAGE_MOBILE_TAB_KEY = 'realcal_mobile_tab';
+const MOBILE_BREAKPOINT = 900;
+const VALID_MOBILE_TABS = ['coach', 'diary', 'results'];
+
+function getMobileTab() {
+  try {
+    const t = localStorage.getItem(STORAGE_MOBILE_TAB_KEY);
+    return VALID_MOBILE_TABS.includes(t) ? t : 'coach';
+  } catch (e) { return 'coach'; }
+}
+function setMobileTab(tab) {
+  if (!VALID_MOBILE_TABS.includes(tab)) tab = 'coach';
+  try { localStorage.setItem(STORAGE_MOBILE_TAB_KEY, tab); } catch (e) {}
+  applyMobileTab(tab);
+}
+function applyMobileTab(tab) {
+  // Drive everything off body classes — CSS does the show/hide
+  const cls = document.body.classList;
+  VALID_MOBILE_TABS.forEach(t => cls.remove('mtab-' + t));
+  cls.add('mtab-' + tab);
+  // Update visual state of tab bar buttons
+  document.querySelectorAll('.m-tab[data-mobile-tab]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mobileTab === tab);
+  });
+  // If switching TO Coach tab and the chat history exists, scroll to bottom
+  if (tab === 'coach') {
+    setTimeout(() => {
+      const histEl = document.getElementById('chat-history');
+      if (histEl) histEl.scrollTop = histEl.scrollHeight;
+    }, 50);
+  }
+}
+function wireMobileTabBar() {
+  document.querySelectorAll('.m-tab[data-mobile-tab]').forEach(btn => {
+    btn.addEventListener('click', () => setMobileTab(btn.dataset.mobileTab));
+  });
+}
 const TODAY_OVERRIDE = null; // production: use real today's date
 
 let state = null;
@@ -2598,65 +2638,73 @@ function renderApp() {
   // Coach-first: seed proactive greeting once per day
   if (isToday) seedDailyGreetingIfNeeded();
 
-  // ============ CENTER: Coach chat + Results ============
+  // ============ CENTER: Coach chat (mobile tab: coach) + Results (mobile tab: results) ============
+  // On desktop, both render as one column. On mobile, each is wrapped with a
+  // data-mobile-tab so CSS can show only the active tab.
   centerC.innerHTML = `
-    ${renderChatStrip({
-      placeholder: "Tell Coach what you ate, or ask anything…",
-      big: true,
-    })}
-
-    <div class="view-header">
-      <div class="view-eyebrow">Results</div>
-      <div class="trend-headline">
-        <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
-        <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
-      </div>
+    <div data-mobile-tab="coach">
+      ${renderChatStrip({
+        placeholder: "Tell Coach what you ate, or ask anything…",
+        big: true,
+      })}
     </div>
 
-    ${renderProgressCard(progress)}
-
-    ${renderAccuracyCard(state)}
-
-    <div class="chart-card">
-      <div class="date-range-row">
-        <div class="bar-chart-legend">
-          <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
-          <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
-          <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
-        </div>
-        <div class="date-range-tabs" id="progress-range-tabs">
-          <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
-          <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
-          <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
-          <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
+    <div data-mobile-tab="results">
+      <div class="view-header">
+        <div class="view-eyebrow">Results</div>
+        <div class="trend-headline">
+          <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
+          <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
         </div>
       </div>
-      <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
+
+      ${renderProgressCard(progress)}
+
+      ${renderAccuracyCard(state)}
+
+      <div class="chart-card">
+        <div class="date-range-row">
+          <div class="bar-chart-legend">
+            <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
+            <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
+            <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
+          </div>
+          <div class="date-range-tabs" id="progress-range-tabs">
+            <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
+            <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
+            <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
+            <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
+          </div>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
+      </div>
     </div>
   `;
 
-  // ============ RIGHT: date nav + today panel + diary stream ============
+  // ============ RIGHT: date nav + today panel + diary stream (mobile tab: diary) ============
   rightC.innerHTML = `
-    <div class="diary-nav diary-nav-compact">
-      <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
-      <div class="diary-nav-center">
-        <div class="diary-nav-label">${getSelectedDateLabel()}</div>
-        <div class="diary-nav-date">${formatHumanDate(date)}</div>
+    <div data-mobile-tab="diary">
+      <div class="diary-nav diary-nav-compact">
+        <button class="diary-nav-btn" id="diary-prev" title="Previous day">‹</button>
+        <div class="diary-nav-center">
+          <div class="diary-nav-label">${getSelectedDateLabel()}</div>
+          <div class="diary-nav-date">${formatHumanDate(date)}</div>
+        </div>
+        <button class="diary-nav-btn" id="diary-next" title="Next day">›</button>
+        <button class="diary-nav-btn diary-nav-cal" id="diary-cal" title="Pick a date">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </button>
+        <input type="date" id="diary-cal-input" class="diary-cal-input" value="${date}" />
+        ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
       </div>
-      <button class="diary-nav-btn" id="diary-next" title="Next day">›</button>
-      <button class="diary-nav-btn diary-nav-cal" id="diary-cal" title="Pick a date">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      </button>
-      <input type="date" id="diary-cal-input" class="diary-cal-input" value="${date}" />
-      ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
-    </div>
 
-    ${renderDailyTotalsBlock(consumed, burnAdj, dayNet, target, macros, water)}
+      ${renderDailyTotalsBlock(consumed, burnAdj, dayNet, target, macros, water)}
 
-    <div class="rp-diary">
-      <div class="rp-section-head">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
-      <div class="diary-stream">
-        ${dayEntries.length ? dayEntries.map(renderDiaryEntry).join('') : `<div class="diary-empty">Nothing logged ${isToday ? 'yet today' : 'this day'}.</div>`}
+      <div class="rp-diary">
+        <div class="rp-section-head">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
+        <div class="diary-stream">
+          ${dayEntries.length ? dayEntries.map(renderDiaryEntry).join('') : `<div class="diary-empty">Nothing logged ${isToday ? 'yet today' : 'this day'}.</div>`}
+        </div>
       </div>
     </div>
   `;
@@ -4558,9 +4606,23 @@ function completeOnboarding() {
 function init() {
   state = loadState();
   chatHistory = loadChatHistory(); // restore today's chat across reloads
+
+  // Register service worker so the app is installable as a PWA. Only in
+  // production (https). Service worker handles offline asset caching;
+  // API calls always pass through to network.
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('/app/service-worker.js').catch(() => {
+      // SW registration failed — not fatal, app still works
+    });
+  }
+
   document.querySelectorAll('[data-view]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.view)));
   document.getElementById('weighin-btn').addEventListener('click', openWeighIn);
   document.getElementById('profile-btn').addEventListener('click', openSettings);
+
+  // Mobile tab bar — wire clicks and apply the saved active tab on load
+  wireMobileTabBar();
+  applyMobileTab(getMobileTab());
   document.getElementById('modal-backdrop').addEventListener('click', (e) => { if (e.target.id === 'modal-backdrop') closeModal(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 

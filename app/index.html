@@ -2,11 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Calorie Correct — The honest calorie counter</title>
 <meta name="description" content="The honest calorie counter that calibrates to your real weight loss.">
+<meta name="theme-color" content="#446957">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Calorie Correct">
 <link rel="icon" type="image/png" href="favicon.png">
-<link rel="apple-touch-icon" href="favicon.png">
+<link rel="apple-touch-icon" href="cc-logo.png">
+<link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="styles.css">
 <script src="chart.umd.min.js"></script>
 </head>
@@ -51,6 +56,22 @@
       <!-- Today's log + macros + date nav rendered here -->
     </div>
   </aside>
+
+  <!-- ================ Mobile bottom tab bar (only visible <900px) ================ -->
+  <nav class="mobile-tab-bar" id="mobile-tab-bar">
+    <button class="m-tab" data-mobile-tab="coach">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Coach</span>
+    </button>
+    <button class="m-tab" data-mobile-tab="diary">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      <span>Diary</span>
+    </button>
+    <button class="m-tab" data-mobile-tab="results">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+      <span>Results</span>
+    </button>
+  </nav>
 
 </div>
 
