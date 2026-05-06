@@ -2720,6 +2720,33 @@ function wireChatStrip() {
           saveState();
           // Use Claude's summary as Coach's reply (already brand-aligned)
           resolveChatTurn(turnId, remote.summary || coachLogResponse(meal, getSelectedDate()), 'log');
+        } else if (remote && remote.intent === 'exercise' && remote.confidence >= 0.6 && Array.isArray(remote.exercises) && remote.exercises.length > 0) {
+          // Exercise log via Claude — one or more activities, each becomes its own entry
+          const now = new Date();
+          const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          const baseId = Date.now();
+          const created = [];
+          remote.exercises.forEach((ex, idx) => {
+            const typeRec = getExerciseTypeById(ex.type);
+            const exercise = {
+              id: baseId + idx,
+              date: getSelectedDate(),
+              time,
+              type: typeRec.id,
+              typeName: typeRec.name,
+              typeEmoji: typeRec.emoji,
+              duration: parseInt(ex.duration_min) || 0,
+              caloriesBurned: parseInt(ex.calories_burned) || 0,
+              note: (ex.note && ex.note.trim()) || ex.name || '',
+              source: 'claude',
+            };
+            state.exercises.push(exercise);
+            recordAction({ type: 'create-exercise', exercise });
+            created.push(exercise);
+          });
+          state.exercises.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+          saveState();
+          resolveChatTurn(turnId, remote.summary || `Logged ${created.length} activit${created.length === 1 ? 'y' : 'ies'}.`, 'log');
         } else if (remote && remote.summary) {
           // Question or ambiguous — show Claude's reply
           resolveChatTurn(turnId, remote.summary, 'coach');
