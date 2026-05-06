@@ -1,0 +1,6 @@
+name = "calorie-correct-coach"
+main = "index.js"
+compatibility_date = "2026-05-01"
+
+# The free tier gives us 100K req/day. Plenty for our scale.
+# ANTHROPIC_API_KEY is set via `wrangler secret put` — never committed.

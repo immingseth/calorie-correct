@@ -473,6 +473,10 @@ const STORAGE_BACKUP_KEY = 'realcal_state_v1_backup';
 const STORAGE_BACKUP_TIME_KEY = 'realcal_state_v1_backup_time';
 const STORAGE_LAST_EXPORT_KEY = 'realcal_last_export';
 const STORAGE_CHAT_KEY = 'realcal_chat_v1'; // last conversation turn — persists across reloads so the Coach bubble doesn't vanish
+
+/* Cloudflare Worker that proxies chat to Claude. Set to null to fall back to
+ * the local placeholder responses (offline mode / Worker down). */
+const WORKER_URL = 'https://calorie-correct-coach.calorie-correct.workers.dev';
 const TODAY_OVERRIDE = null; // production: use real today's date
 
 let state = null;
@@ -2002,9 +2006,86 @@ function seedDailyGreetingIfNeeded() {
   saveState();
 }
 
+/* Build a compact user-context snapshot the Worker passes to Claude in the
+ * system prompt. Keep it short — token cost grows fast otherwise. */
+function buildUserContext(s) {
+  const cal = getCalibration(s);
+  const currentW = getCurrentWeight(s);
+  const totalLoss = s.user.startWeight - currentW;
+  const rate7 = get7dRate(s);
+  const target = getDailyTarget(s);
+  const today = todayISO();
+  const todayIntake = getDailyCalories(s, today);
+
+  return {
+    name: s.user.name,
+    sex: s.user.sex,
+    age: s.user.age,
+    heightInches: s.user.heightInches,
+    startWeight: s.user.startWeight,
+    currentWeight: Math.round(currentW * 10) / 10,
+    goalWeight: s.user.goalWeight,
+    totalLossLb: Math.round(totalLoss * 10) / 10,
+    rate7DayLbPerWk: rate7 != null ? Math.round(rate7 * 100) / 100 : null,
+    targetLossRateLbPerWk: s.user.targetLossRate,
+    dailyTargetCal: target,
+    todayIntakeCal: todayIntake,
+    daysOfData: (s.weights || []).length,
+    calibrationReady: !!cal.ready,
+    observedAccuracyPct: (cal.ready && cal.trackingAccuracy != null) ? Math.round(cal.trackingAccuracy * 100) : null,
+    trackerAccuracyPct: Math.round((s.user.trackerAccuracy || 0.7) * 100),
+    foodAccuracyPct: Math.round((s.user.foodAccuracy || 0.85) * 100),
+  };
+}
+
+/* Convert our chatHistory (array of { user, coach, kind, greeting, pending })
+ * into the Anthropic messages format ([{ role: 'user'|'assistant', content }]).
+ * Skips greetings (no user message), pending turns, and the most recent turn
+ * if it's the one we're currently submitting. */
+function chatHistoryForApi(excludeTurnId) {
+  const messages = [];
+  for (const t of chatHistory) {
+    if (t.id === excludeTurnId) continue;
+    if (t.pending) continue;
+    if (t.user) messages.push({ role: 'user', content: t.user });
+    if (t.coach) messages.push({ role: 'assistant', content: stripHtml(t.coach) });
+  }
+  return messages;
+}
+
+/* Strip the small amount of HTML we put in coach responses (mainly <strong>)
+ * so it doesn't pollute the model's context. */
+function stripHtml(s) {
+  return String(s || '').replace(/<[^>]+>/g, '');
+}
+
+/* Async — call the Worker to get a real Claude response.
+ * Falls back to the local canned response on any failure (network, timeout,
+ * 5xx, etc.) so the chat keeps working offline / when API is down. */
+async function coachQuestionResponseRemote(text, excludeTurnId) {
+  if (!WORKER_URL) return coachQuestionResponse(text);
+  try {
+    const response = await fetch(WORKER_URL + '/api/coach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        history: chatHistoryForApi(excludeTurnId),
+        userContext: buildUserContext(state),
+      }),
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (!data.reply) throw new Error('Empty reply');
+    return data.reply;
+  } catch (e) {
+    // Fall through to local canned response
+    return coachQuestionResponse(text);
+  }
+}
+
 /* Generate a Coach response for input that didn't parse as a meal.
- * For now, polite placeholder + the canned coach response if the question
- * matches a known topic. Real Claude wires up later. */
+ * Local fallback used when the Worker is unreachable. */
 function coachQuestionResponse(text) {
   // Try the existing canned coach matcher first
   const cannedHtml = getCoachResponse(text);
@@ -2101,12 +2182,14 @@ function wireChatStrip() {
     chatRefocusOnNextRender = true;
     navigate(currentView);
 
-    // Async response — typing delay then resolution
-    setTimeout(() => {
+    // Async response — meal logs use the local parser (still local for now;
+    // Phase 2C will move meal parsing to Claude). Questions go to the Worker.
+    (async () => {
       try {
         const items = parseMealText(text);
         const hasMatch = items.some(it => it.source === 'matched');
         if (hasMatch) {
+          // Local meal log path — fast, no API call needed
           const now = new Date();
           const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
           const totalCal = items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
@@ -2123,15 +2206,19 @@ function wireChatStrip() {
           state.meals.push(meal);
           recordAction({ type: 'create-meal', meal });
           saveState();
+          // Brief delay so the typing indicator is visible (otherwise feels instant/jarring)
+          await new Promise(r => setTimeout(r, 320));
           resolveChatTurn(turnId, coachLogResponse(meal, getSelectedDate()), 'log');
         } else {
-          resolveChatTurn(turnId, coachQuestionResponse(text), 'coach');
+          // Question path — call the Worker
+          const reply = await coachQuestionResponseRemote(text, turnId);
+          resolveChatTurn(turnId, reply, 'coach');
         }
       } catch (e) {
         resolveChatTurn(turnId, "Sorry — something went wrong on my end. Try again in a moment?", 'error');
       }
       navigate(currentView);
-    }, 420);
+    })();
   };
 
   sendBtn.addEventListener('click', submit);

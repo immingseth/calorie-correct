@@ -40,3 +40,13 @@ node_modules/
 # Anthropic / Claude session metadata (if it ever lands here)
 .claude/
 *.jsonl
+
+# Cloudflare Worker — never commit secrets, build outputs, or local config
+worker/.dev.vars
+worker/.wrangler/
+worker/node_modules/
+worker/dist/
+.env
+.env.local
+*.key
+*.pem
