@@ -2567,12 +2567,17 @@ function buildUserContext(s) {
     .filter(w => w.date === today)
     .reduce((sum, w) => sum + (parseInt(w.oz) || 0), 0);
 
-  // TDEE estimate for today: BMR × activity multiplier + tracker-discounted
-  // exercise burn. Today's net deficit = TDEE − intake (positive means deficit).
-  const bmr = Math.round(mifflinStJeor(s.user, currentW));
+  // TDEE math — must match the Today card's renderDailyTotalsBlock exactly,
+  // otherwise Cal will quote a different NET than the user sees on screen.
+  // Card computes: baselineTDEE = round(BMR_raw × activityMult), then
+  // totalOut = baselineTDEE + burned, then realNet = consumed − totalOut.
+  // Mirror that order here.
+  const bmrRaw = mifflinStJeor(s.user, currentW);
   const activityMult = getActivityMultiplier(s.user.activityLevel || 'light');
-  const todayTDEE = Math.round(bmr * activityMult + todayBurnCalDisplayed);
-  const todayNetDeficit = todayIntake > 0 ? Math.round(todayTDEE - todayIntake) : null;
+  const baselineTDEE = Math.round(bmrRaw * activityMult);
+  const todayTDEE = baselineTDEE + todayBurnCalDisplayed;
+  const bmr = Math.round(bmrRaw); // standalone field for Cal's reference
+  const todayNetDeficit = todayIntake > 0 ? todayTDEE - todayIntake : null;
 
   // Projected goal date — only meaningful if user is actively losing.
   // Uses observed 7-day rate (rate7), not target rate.
@@ -2599,14 +2604,22 @@ function buildUserContext(s) {
     targetLossRateLbPerWk: s.user.targetLossRate,
     activityLevel: s.user.activityLevel || 'light',
     bmrCal: bmr,
+    activityMultiplier: activityMult,
+    baselineTDEE, // BMR × activity multiplier — the basal "out" before logged exercise
     today,
     yesterday: yesterdayISO,
     dailyTargetCal: target,
     todayIntakeCal: todayIntake,
     todayBurnCalRaw,
     todayBurnCalDisplayed,
-    todayNetCal: todayIntake - todayBurnCalDisplayed,
-    todayRemainingToTargetNet: target - (todayIntake - todayBurnCalDisplayed),
+    // Today's energy balance NET — matches what the Today card displays.
+    // Negative = deficit (under TDEE), positive = surplus (over TDEE), 0 = balanced.
+    // Same definition used everywhere in the UI now: in − out.
+    todayNetCal: todayIntake - todayTDEE,
+    // Goal NET — what the user is aiming for. Negative for loss, 0 for
+    // maintenance, positive for gain. Compare todayNetCal to targetNetCal
+    // to answer "am I on track?".
+    targetNetCal: -Math.round(((s.user.targetLossRate != null ? s.user.targetLossRate : 1.0) * 3500) / 7),
     todayTDEE,
     todayNetDeficit,
     todayMacros,
