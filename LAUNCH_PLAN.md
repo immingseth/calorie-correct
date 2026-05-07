@@ -21,10 +21,15 @@ Each phase has explicit success criteria before advancing. Don't rush ahead.
 These are non-negotiable through every phase. They're what make Calorie
 Correct different from MyFitnessPal/Lose It/Noom — losing them defeats the pitch.
 
-- **Honest calibration > obsessive precision.** Math, not motivation.
-- **No streaks, badges, pep talks, or gamification.** Coach is the retention loop.
+- **Calibrated calorie tracking.** The promise is "the closest possible
+  numbers to reality" — we correct logged intake and burn against actual
+  weight change over time. Useful for cutters, maintainers, and athletes
+  fueling workouts. Net calories (intake − burn) is the headline metric
+  on every "today" view.
+- **Honest realistic energy balance.** Math, not motivation.
+- **No streaks, badges, pep talks, or gamification.** Cal is the retention loop.
 - **No ads, ever.** Subscription-only revenue.
-- **Privacy by default.** No third-party tracking pixels. Coach conversations
+- **Privacy by default.** No third-party tracking pixels. Cal conversations
   not used for training. Data export + delete must work and be easy.
 - **Sentence case copy. Real voice. No corporate filler.**
 

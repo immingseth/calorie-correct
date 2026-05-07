@@ -784,6 +784,24 @@ html, body {
   font-weight: 500;
 }
 
+/* Today panel — breakdown line under the Net / Remaining headline.
+ * Shows the components that make up Net: "1,800 in · −185 burned".
+ * Small, muted; serves as a quick reference without dominating the card. */
+.today-breakdown {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted, #8A8278);
+  margin-top: 4px;
+  margin-bottom: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.today-breakdown-in { color: var(--text-soft, #4A4540); }
+.today-breakdown-burn { color: var(--accent, #B8855E); font-weight: 500; }
+.today-breakdown-sep { color: var(--border, #ECE5D8); }
+
 /* Water quick-add chips */
 .water-quick-add {
   display: flex;

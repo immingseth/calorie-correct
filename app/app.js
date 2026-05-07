@@ -2588,6 +2588,8 @@ function buildUserContext(s) {
     todayIntakeCal: todayIntake,
     todayBurnCalRaw,
     todayBurnCalDisplayed,
+    todayNetCal: todayIntake - todayBurnCalDisplayed,
+    todayRemainingToTargetNet: target - (todayIntake - todayBurnCalDisplayed),
     todayTDEE,
     todayNetDeficit,
     todayMacros,
@@ -3584,10 +3586,19 @@ function renderDiaryEntry(entry) {
 /* Daily totals block — shown at the bottom of the diary stream.
  * Calories in / burned / net / target, plus macros + water totals. */
 function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) {
+  // Burn-aware totals. Net = what the body actually absorbs (intake − burn,
+  // both already discounted by the user's tracker accuracy). Remaining =
+  // target net − current net, i.e. how many more cal they can eat and still
+  // land on their goal. Same math as before but exercise is now first-class
+  // on both sides of the equation — useful for everyone from cutters to
+  // athletes who need to fuel.
   const hasIntake = consumed > 0;
-  const remaining = target - consumed;
+  const hasBurn = burned > 0;
+  const hasActivity = hasIntake || hasBurn;
+  const remaining = target - net;
   const remainingLabel = remaining >= 0 ? 'Remaining' : 'Over target';
   const remainingValue = Math.abs(remaining);
+
   const proteinCal = macros.protein * 4;
   const carbCal = macros.carbs * 4;
   const fatCal = macros.fat * 9;
@@ -3598,6 +3609,16 @@ function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) 
   const fatPct = hasMacros ? 100 - proteinPct - carbPct : 0;
   const fiber = (macros.fiber != null) ? macros.fiber : 0;
 
+  // Net display. Show the actual value (can be negative if exercise without food).
+  const netDisplay = hasActivity ? net.toLocaleString() : '—';
+  const remainingDisplay = hasActivity ? remainingValue.toLocaleString() : target.toLocaleString();
+  const remainingShownLabel = hasActivity ? remainingLabel : 'Daily target';
+
+  // Breakdown line shown small under the headline: "1,800 in   −185 burned"
+  const breakdownParts = [];
+  if (hasIntake) breakdownParts.push(`<span class="today-breakdown-in">${consumed.toLocaleString()} in</span>`);
+  if (hasBurn)   breakdownParts.push(`<span class="today-breakdown-burn">−${burned.toLocaleString()} burned</span>`);
+
   return `<div class="today-panel">
     <div class="today-panel-head">
       <span class="today-panel-eyebrow">Today</span>
@@ -3605,15 +3626,17 @@ function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) 
 
     <div class="today-headline">
       <div class="today-headline-cell">
-        <div class="today-bignum">${hasIntake ? consumed.toLocaleString() : '—'}</div>
-        <div class="today-bignum-label">Calories in</div>
+        <div class="today-bignum ${hasActivity && net < 0 ? 'today-bignum-over' : ''}">${netDisplay}</div>
+        <div class="today-bignum-label">Net calories</div>
       </div>
       <div class="today-headline-divider"></div>
       <div class="today-headline-cell">
-        <div class="today-bignum ${remaining < 0 ? 'today-bignum-over' : 'today-bignum-accent'}">${hasIntake ? remainingValue.toLocaleString() : target.toLocaleString()}</div>
-        <div class="today-bignum-label">${hasIntake ? remainingLabel : 'Daily target'}</div>
+        <div class="today-bignum ${remaining < 0 ? 'today-bignum-over' : 'today-bignum-accent'}">${remainingDisplay}</div>
+        <div class="today-bignum-label">${remainingShownLabel}</div>
       </div>
     </div>
+
+    ${breakdownParts.length > 0 ? `<div class="today-breakdown">${breakdownParts.join(' <span class="today-breakdown-sep">·</span> ')}</div>` : ''}
 
     ${hasMacros ? `
     <div class="today-macro-bar-wrap">
@@ -3653,12 +3676,6 @@ function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) 
       </div>
     </div>
 
-    ${hasIntake || burned > 0 ? `
-    <div class="today-footer">
-      <span class="today-footer-burn">${burned > 0 ? '−' + burned.toLocaleString() + ' burned' : 'No exercise logged'}</span>
-      <span class="today-footer-net">net ${hasIntake ? net.toLocaleString() : '0'} cal</span>
-    </div>
-    ` : ''}
   </div>`;
 }
 
