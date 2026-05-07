@@ -2443,7 +2443,13 @@ function buildUserContext(s) {
       caloriesBurned: e.caloriesBurned || 0,
       note: e.note || '',
     }));
-  const todayBurnCal = todayExercises.reduce((sum, x) => sum + (x.caloriesBurned || 0), 0);
+  const todayBurnCalRaw = todayExercises.reduce((sum, x) => sum + (x.caloriesBurned || 0), 0);
+  // The app's UI shows burn AFTER applying the user's trackerAccuracy multiplier
+  // (a personal "discount" — fitness trackers chronically over-report). Coach
+  // needs the displayed number too, otherwise it looks like the math is wrong
+  // when a user asks "why is my burn so low?".
+  const trackerAccDecimal = s.user.trackerAccuracy != null ? s.user.trackerAccuracy : 1.0;
+  const todayBurnCalDisplayed = Math.round(todayBurnCalRaw * trackerAccDecimal);
 
   // User's saved recipes — Coach uses these to recognize "log my morning
   // smoothie" and to update existing recipes by name.
@@ -2467,7 +2473,8 @@ function buildUserContext(s) {
     targetLossRateLbPerWk: s.user.targetLossRate,
     dailyTargetCal: target,
     todayIntakeCal: todayIntake,
-    todayBurnCal,
+    todayBurnCalRaw,
+    todayBurnCalDisplayed,
     todayMeals,
     todayExercises,
     recipes,
