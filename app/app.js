@@ -2427,11 +2427,20 @@ function buildUserContext(s) {
   const today = todayISO();
   const todayIntake = getDailyCalories(s, today);
 
-  // Today's actual logged items, with IDs, so Coach can reference them by name
-  // and emit edit/delete operations targeting specific entries. This also
-  // means Coach sees the live truth, not just stale chat history.
-  const todayMeals = (s.meals || [])
-    .filter(m => m.date === today)
+  // Compact item shape used inside todayMeals / yesterdayMeals so Coach can
+  // copy meals faithfully ("today I had the same as yesterday") without
+  // having to re-estimate macros from a description string.
+  const compactItem = (i) => ({
+    name: i.name || 'item',
+    portion: i.portion || '',
+    calories: parseInt(i.calories) || 0,
+    protein_g: Math.round((parseFloat(i.protein_g) || 0) * 10) / 10,
+    carbs_g:   Math.round((parseFloat(i.carbs_g)   || 0) * 10) / 10,
+    fat_g:     Math.round((parseFloat(i.fat_g)     || 0) * 10) / 10,
+    fiber_g:   Math.round((parseFloat(i.fiber_g)   || 0) * 10) / 10,
+  });
+  const buildMealsFor = (date) => (s.meals || [])
+    .filter(m => m.date === date)
     .map(m => ({
       id: m.id,
       time: m.time || '',
@@ -2440,9 +2449,10 @@ function buildUserContext(s) {
         ? m.items.map(i => i.name).filter(Boolean).join(', ').slice(0, 100)
         : (m.raw || 'meal'),
       totalCal: m.totalCal != null ? m.totalCal : (m.items || []).reduce((sum, x) => sum + (parseInt(x.calories) || 0), 0),
+      items: (m.items || []).map(compactItem),
     }));
-  const todayExercises = (s.exercises || [])
-    .filter(e => e.date === today)
+  const buildExercisesFor = (date) => (s.exercises || [])
+    .filter(e => e.date === date)
     .map(e => ({
       id: e.id,
       time: e.time || '',
@@ -2452,6 +2462,18 @@ function buildUserContext(s) {
       caloriesBurned: e.caloriesBurned || 0,
       note: e.note || '',
     }));
+  const todayMeals = buildMealsFor(today);
+  const todayExercises = buildExercisesFor(today);
+  // Yesterday's meals + exercises so Coach can reference and copy from them
+  // ("today I ate the same as yesterday"). Same compact item shape — full
+  // macros included so copies are faithful.
+  const yesterdayISO = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const yesterdayMeals = buildMealsFor(yesterdayISO);
+  const yesterdayExercises = buildExercisesFor(yesterdayISO);
   const todayBurnCalRaw = todayExercises.reduce((sum, x) => sum + (x.caloriesBurned || 0), 0);
   // The app's UI shows burn AFTER applying the user's trackerAccuracy multiplier
   // (a personal "discount" — fitness trackers chronically over-report). Coach
@@ -2506,13 +2528,6 @@ function buildUserContext(s) {
     projectedGoalDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   }
 
-  // Yesterday's ISO so Coach can resolve "yesterday" without timezone mistakes.
-  const yISO = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
-
   return {
     name: s.user.name,
     sex: s.user.sex,
@@ -2528,7 +2543,7 @@ function buildUserContext(s) {
     activityLevel: s.user.activityLevel || 'light',
     bmrCal: bmr,
     today,
-    yesterday: yISO,
+    yesterday: yesterdayISO,
     dailyTargetCal: target,
     todayIntakeCal: todayIntake,
     todayBurnCalRaw,
@@ -2539,6 +2554,8 @@ function buildUserContext(s) {
     todayWaterOz,
     todayMeals,
     todayExercises,
+    yesterdayMeals,
+    yesterdayExercises,
     recipes,
     weeksToGoal,
     projectedGoalDate,

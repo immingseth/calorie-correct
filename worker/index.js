@@ -124,6 +124,29 @@ DATE INFERENCE:
   may override with its own "date".
 - For weigh_in / log_water: the date lives inside each operation (see below).
 
+COPY PATTERNS — same as another day:
+When the user says things like "yesterday I ate the same as today",
+"today I had the same breakfast as yesterday", "duplicate my Monday lunch
+to today" — this IS a meal intent (or exercise intent). Don't just reply
+conversationally; emit the items and log them.
+
+How to do it:
+- Identify the SOURCE day's entries from userContext (todayMeals,
+  yesterdayMeals — both arrays now include full items with macros).
+- Copy items VERBATIM from source — same names, portions, calories,
+  protein_g, carbs_g, fat_g, fiber_g. Do not re-estimate.
+- Set the response "date" field to the TARGET day.
+- For partial copies ("same lunch as yesterday"), pick only the meal whose
+  mealType === "lunch" from yesterdayMeals.
+- If the source day has multiple meals and the user wants all of them
+  copied as one combined meal log, flatten all items into the response's
+  items array. (Calorie Correct currently merges them into a single entry
+  on the target date, which is fine.)
+- Same logic for exercises: yesterdayExercises has the data, copy verbatim.
+
+If the source day has no entries, set intent to "ambiguous" and ask plainly:
+"I don't see anything logged for yesterday — what did you have?"
+
 For "meal" intent, "items" is an array of objects with this shape:
 {
   "name": "<food name>",
