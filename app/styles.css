@@ -784,9 +784,9 @@ html, body {
   font-weight: 500;
 }
 
-/* Today panel — breakdown line under the Net / Remaining headline.
- * Shows the components that make up Net: "1,800 in · −185 burned".
- * Small, muted; serves as a quick reference without dominating the card. */
+/* Today panel — breakdown line under the NET / 2nd number headline.
+ * Shows the user's target NET so they know what they're aiming for.
+ * Small, muted; supportive context for the headline numbers. */
 .today-breakdown {
   display: flex;
   justify-content: center;
@@ -798,9 +798,40 @@ html, body {
   margin-bottom: 14px;
   font-variant-numeric: tabular-nums;
 }
-.today-breakdown-in { color: var(--text-soft, #4A4540); }
-.today-breakdown-burn { color: var(--accent, #B8855E); font-weight: 500; }
-.today-breakdown-sep { color: var(--border, #ECE5D8); }
+.today-breakdown-target {
+  font-style: italic;
+}
+
+/* NET color states — tied to the user's goal direction.
+ * Green = on track, yellow = drifting, red = off goal. */
+.today-bignum.today-net-green  { color: var(--primary-dark, #446957); }
+.today-bignum.today-net-yellow { color: #C28B3A; }
+.today-bignum.today-net-red    { color: #B8543A; }
+
+/* Toggle button styling — second-number cell becomes clickable. */
+.today-headline-cell-toggle {
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+.today-headline-cell-toggle:hover { background: var(--primary-soft, #EAF0EC); }
+.today-headline-cell-toggle:active .today-bignum { transform: scale(0.97); }
+.today-headline-cell-toggle .today-bignum { transition: transform 0.1s ease; }
+.today-toggle-hint {
+  font-size: 9px;
+  color: var(--muted, #8A8278);
+  margin-left: 4px;
+  opacity: 0.6;
+  letter-spacing: 0;
+}
 
 /* Water quick-add chips */
 .water-quick-add {

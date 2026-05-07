@@ -567,6 +567,23 @@ function wireChatCollapseToggle() {
   });
 }
 
+/* Today panel — second-number toggle. Card shows NET as the headline; user
+ * can click the second slot to switch between "Cals In" (food intake) and
+ * "Cals Out" (full TDEE: BMR × activity + exercise burn). Persists. */
+const STORAGE_TOTALS_2ND_KEY = 'realcal_totals_2nd';
+
+function getTotals2nd() {
+  try {
+    const v = localStorage.getItem(STORAGE_TOTALS_2ND_KEY);
+    if (v === 'in' || v === 'out') return v;
+  } catch (e) {}
+  return 'out'; // default — pairs with NET semantically (in − out = NET)
+}
+function setTotals2nd(choice) {
+  try { localStorage.setItem(STORAGE_TOTALS_2ND_KEY, choice); } catch (e) {}
+  navigate(currentView);
+}
+
 /* Active Results tab — drives which widget is visible below the chat
  * (Progress / Accuracy / Trend). Pure CSS toggle; no re-render. The Trend
  * tab also re-inits Chart.js on activation to handle the case where the
@@ -3401,7 +3418,15 @@ function renderApp() {
         ${!isToday ? `<button class="diary-nav-today" id="diary-today">Today</button>` : ''}
       </div>
 
-      ${renderDailyTotalsBlock(consumed, burnAdj, dayNet, target, macros, water)}
+      ${renderDailyTotalsBlock({
+        consumed,
+        burned: burnAdj,
+        baselineTDEE: Math.round(mifflinStJeor(state.user, currentW) * getActivityMultiplier(state.user.activityLevel || 'light')),
+        macros,
+        waterOz: water,
+        targetNet: -Math.round(((state.user.targetLossRate != null ? state.user.targetLossRate : 1.0) * 3500) / 7),
+        secondNum: getTotals2nd(),
+      })}
 
       <div class="rp-diary">
         <div class="rp-section-head">${dayEntries.length} ${dayEntries.length === 1 ? 'entry' : 'entries'}</div>
@@ -3429,6 +3454,12 @@ function renderApp() {
   rightC.querySelectorAll('[data-exercise-id]').forEach(el => el.addEventListener('click', () => openExerciseEdit(parseInt(el.dataset.exerciseId))));
   rightC.querySelectorAll('[data-weight-date]').forEach(el => el.addEventListener('click', () => openWeightEdit(el.dataset.weightDate)));
   rightC.querySelectorAll('[data-water-id]').forEach(el => el.addEventListener('click', () => openWaterEdit(parseInt(el.dataset.waterId))));
+
+  // Today panel — click the second number to toggle Cals In ↔ Cals Out
+  const totalsToggle = document.getElementById('today-2nd-toggle');
+  if (totalsToggle) totalsToggle.addEventListener('click', () => {
+    setTotals2nd(getTotals2nd() === 'in' ? 'out' : 'in');
+  });
 
   // Wire center column interactions
   centerC.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); renderApp(); }));
@@ -3585,20 +3616,64 @@ function renderDiaryEntry(entry) {
 
 /* Daily totals block — shown at the bottom of the diary stream.
  * Calories in / burned / net / target, plus macros + water totals. */
-function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) {
-  // Burn-aware totals. Net = what the body actually absorbs (intake − burn,
-  // both already discounted by the user's tracker accuracy). Remaining =
-  // target net − current net, i.e. how many more cal they can eat and still
-  // land on their goal. Same math as before but exercise is now first-class
-  // on both sides of the equation — useful for everyone from cutters to
-  // athletes who need to fuel.
-  const hasIntake = consumed > 0;
-  const hasBurn = burned > 0;
-  const hasActivity = hasIntake || hasBurn;
-  const remaining = target - net;
-  const remainingLabel = remaining >= 0 ? 'Remaining' : 'Over target';
-  const remainingValue = Math.abs(remaining);
+function renderDailyTotalsBlock(opts) {
+  // NET = (all calories in) − (all calories out)
+  //     = intake − (BMR × activity + exercise burn)
+  // Negative = deficit (under TDEE), positive = surplus.
+  // The card headline is signed NET, color-coded against the user's goal
+  // (loss / maintenance / gain). The second slot toggles between Cals In and
+  // Cals Out — click to switch, preference persists.
+  const {
+    consumed,         // intake (cal)
+    burned,           // exercise burn after tracker accuracy
+    baselineTDEE,     // BMR × activityMult (basal-only; no logged exercise)
+    macros,
+    waterOz,
+    targetNet,        // goal NET (e.g. −500 for 1 lb/wk loss, 0 for maintenance)
+    secondNum,        // 'in' | 'out'
+  } = opts;
 
+  const totalOut = baselineTDEE + burned;
+  const realNet = consumed - totalOut;
+  const hasIntake = consumed > 0;
+  const hasActivity = hasIntake || burned > 0;
+
+  // Color the NET headline based on goal direction. Magnitudes are intentional
+  // — light bands favor "good" outcomes so the user gets positive feedback
+  // when they're close to target without forcing perfectionism.
+  let netColorClass = '';
+  if (hasActivity) {
+    if (targetNet < 0) {
+      // Loss goal
+      if (realNet <= targetNet * 0.5) netColorClass = 'today-net-green';
+      else if (realNet <= 0)          netColorClass = 'today-net-yellow';
+      else                            netColorClass = 'today-net-red';
+    } else if (targetNet > 0) {
+      // Gain goal
+      if (realNet >= targetNet * 0.5) netColorClass = 'today-net-green';
+      else if (realNet >= 0)          netColorClass = 'today-net-yellow';
+      else                            netColorClass = 'today-net-red';
+    } else {
+      // Maintenance
+      if (Math.abs(realNet) <= 150)  netColorClass = 'today-net-green';
+      else if (Math.abs(realNet) <= 400) netColorClass = 'today-net-yellow';
+      else                            netColorClass = 'today-net-red';
+    }
+  }
+
+  // Format NET with explicit sign. "−600" or "+400". Zero shows as "0".
+  const netSign = realNet > 0 ? '+' : (realNet < 0 ? '−' : '');
+  const netDisplay = hasActivity
+    ? `${netSign}${Math.abs(realNet).toLocaleString()}`
+    : '—';
+
+  // Second number — toggleable
+  const secondValue = secondNum === 'in' ? consumed : totalOut;
+  const secondLabel = secondNum === 'in' ? 'Cals in' : 'Cals out';
+  const otherLabel  = secondNum === 'in' ? 'Cals out' : 'Cals in';
+  const secondDisplay = (secondNum === 'in' && !hasIntake) ? '—' : secondValue.toLocaleString();
+
+  // Macros computation — unchanged
   const proteinCal = macros.protein * 4;
   const carbCal = macros.carbs * 4;
   const fatCal = macros.fat * 9;
@@ -3609,15 +3684,13 @@ function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) 
   const fatPct = hasMacros ? 100 - proteinPct - carbPct : 0;
   const fiber = (macros.fiber != null) ? macros.fiber : 0;
 
-  // Net display. Show the actual value (can be negative if exercise without food).
-  const netDisplay = hasActivity ? net.toLocaleString() : '—';
-  const remainingDisplay = hasActivity ? remainingValue.toLocaleString() : target.toLocaleString();
-  const remainingShownLabel = hasActivity ? remainingLabel : 'Daily target';
-
-  // Breakdown line shown small under the headline: "1,800 in   −185 burned"
-  const breakdownParts = [];
-  if (hasIntake) breakdownParts.push(`<span class="today-breakdown-in">${consumed.toLocaleString()} in</span>`);
-  if (hasBurn)   breakdownParts.push(`<span class="today-breakdown-burn">−${burned.toLocaleString()} burned</span>`);
+  // Tiny breakdown under the headline shows both components + the target.
+  // Always rendered (even with no activity) so the user sees their context.
+  const targetText = targetNet < 0
+    ? `target ${targetNet} (${(Math.abs(targetNet) * 7 / 3500).toFixed(1)} lb/wk loss)`
+    : targetNet > 0
+      ? `target +${targetNet} (${(targetNet * 7 / 3500).toFixed(1)} lb/wk gain)`
+      : 'target 0 (maintenance)';
 
   return `<div class="today-panel">
     <div class="today-panel-head">
@@ -3626,17 +3699,19 @@ function renderDailyTotalsBlock(consumed, burned, net, target, macros, waterOz) 
 
     <div class="today-headline">
       <div class="today-headline-cell">
-        <div class="today-bignum ${hasActivity && net < 0 ? 'today-bignum-over' : ''}">${netDisplay}</div>
-        <div class="today-bignum-label">Net calories</div>
+        <div class="today-bignum ${netColorClass}">${netDisplay}</div>
+        <div class="today-bignum-label">Net</div>
       </div>
       <div class="today-headline-divider"></div>
-      <div class="today-headline-cell">
-        <div class="today-bignum ${remaining < 0 ? 'today-bignum-over' : 'today-bignum-accent'}">${remainingDisplay}</div>
-        <div class="today-bignum-label">${remainingShownLabel}</div>
-      </div>
+      <button class="today-headline-cell today-headline-cell-toggle" id="today-2nd-toggle" title="Click to switch to ${otherLabel}">
+        <div class="today-bignum">${secondDisplay}</div>
+        <div class="today-bignum-label">${secondLabel} <span class="today-toggle-hint">⇄</span></div>
+      </button>
     </div>
 
-    ${breakdownParts.length > 0 ? `<div class="today-breakdown">${breakdownParts.join(' <span class="today-breakdown-sep">·</span> ')}</div>` : ''}
+    <div class="today-breakdown">
+      <span class="today-breakdown-target">${targetText}</span>
+    </div>
 
     ${hasMacros ? `
     <div class="today-macro-bar-wrap">
