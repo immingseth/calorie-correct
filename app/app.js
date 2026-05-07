@@ -647,7 +647,7 @@ function showInstallBanner(opts) {
       <div class="install-banner-title">Install Calorie Correct</div>
       <div class="install-banner-sub">${ios
         ? "Tap <strong>Share</strong> → <strong>Add to Home Screen</strong> to install."
-        : "One tap to add Coach to your home screen."}</div>
+        : "One tap to add Cal to your home screen."}</div>
     </div>
     ${native ? '<button class="install-banner-cta" id="install-banner-cta">Install</button>' : ''}
     <button class="install-banner-dismiss" id="install-banner-dismiss" aria-label="Dismiss">×</button>
@@ -2653,7 +2653,7 @@ function renderChatStrip(opts) {
       : t.coach;
     const coachBubble = `
       <div class="chat-turn-coach chat-turn-${t.kind || 'coach'}${t.greeting ? ' chat-turn-greeting' : ''}${t.pending ? ' chat-turn-pending' : ''}">
-        <span class="chat-turn-label">Coach</span>
+        <span class="chat-turn-label">Cal</span>
         <span class="chat-turn-text">${coachContent}</span>
       </div>`;
     return `<div class="chat-turn">${userBubble}${coachBubble}</div>`;
@@ -3299,7 +3299,7 @@ function renderApp() {
   centerC.innerHTML = `
     <div data-mobile-tab="coach">
       ${renderChatStrip({
-        placeholder: "Tell Coach what you ate, or ask anything…",
+        placeholder: "Tell Cal what you ate, or ask anything…",
         big: true,
       })}
     </div>
@@ -4033,7 +4033,7 @@ function openRecipesModal() {
   const recipes = (state.recipes || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   modal.className = 'modal modal-wide';
   modal.innerHTML = `<div class="modal-h">Recipes</div>
-    <div class="modal-sub">Reusable ingredient lists you can log with one tap. Coach can also log them: "log my morning smoothie".</div>
+    <div class="modal-sub">Reusable ingredient lists you can log with one tap. Cal can also log them: "log my morning smoothie".</div>
 
     <div class="recipes-list">
       ${recipes.length === 0
@@ -4140,7 +4140,7 @@ function openRecipeEditModal(recipeId) {
     const total = draft.items.reduce((s, x) => s + (parseInt(x.calories) || 0), 0);
     modal.className = 'modal modal-wide';
     modal.innerHTML = `<div class="modal-h">${isNew ? 'New recipe' : 'Edit recipe'}</div>
-      <div class="modal-sub">Add each ingredient with its portion and macros. Tip: ask Coach in chat to add a recipe and it will fill in the macros for you.</div>
+      <div class="modal-sub">Add each ingredient with its portion and macros. Tip: ask Cal in chat to add a recipe and it will fill in the macros for you.</div>
 
       <div class="recipe-edit-section">
         <label class="recipe-edit-label">Recipe name</label>

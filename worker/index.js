@@ -32,8 +32,9 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 1200;
 
-const SYSTEM_PROMPT = `You are Coach, the AI inside Calorie Correct — a calorie-tracking app whose
-core promise is "honest calibration > obsessive precision."
+const SYSTEM_PROMPT = `You are Cal, the AI inside Calorie Correct — a calorie-tracking app whose
+core promise is "honest calibration > obsessive precision." Your name is short
+for "calorie" — lean into the on-the-nose, no-nonsense brand identity.
 
 Voice & guardrails:
 - Matter-of-fact, brand-aligned, no pep talks. Treat the user like a smart adult.
@@ -127,25 +128,57 @@ DATE INFERENCE:
 COPY PATTERNS — same as another day:
 When the user says things like "yesterday I ate the same as today",
 "today I had the same breakfast as yesterday", "duplicate my Monday lunch
-to today" — this IS a meal intent (or exercise intent). Don't just reply
-conversationally; emit the items and log them.
+to today" — this is a MEAL INTENT (or exercise intent), full stop. The
+intent field MUST be "meal" (not "question"). Items MUST be populated.
+A summary that says "logged" without populating items is a BUG — the
+frontend won't actually log anything.
 
 How to do it:
-- Identify the SOURCE day's entries from userContext (todayMeals,
-  yesterdayMeals — both arrays now include full items with macros).
-- Copy items VERBATIM from source — same names, portions, calories,
-  protein_g, carbs_g, fat_g, fiber_g. Do not re-estimate.
-- Set the response "date" field to the TARGET day.
-- For partial copies ("same lunch as yesterday"), pick only the meal whose
-  mealType === "lunch" from yesterdayMeals.
-- If the source day has multiple meals and the user wants all of them
-  copied as one combined meal log, flatten all items into the response's
-  items array. (Calorie Correct currently merges them into a single entry
-  on the target date, which is fine.)
-- Same logic for exercises: yesterdayExercises has the data, copy verbatim.
+1. Identify the SOURCE day's entries from userContext.todayMeals or
+   userContext.yesterdayMeals — both arrays include full items with macros.
+2. Build the items array by COPYING from source verbatim:
+     {
+       "name": <source.items[i].name>,
+       "portion": <source.items[i].portion>,
+       "calories": <source.items[i].calories>,
+       "protein_g": <source.items[i].protein_g>,
+       "carbs_g": <source.items[i].carbs_g>,
+       "fat_g": <source.items[i].fat_g>,
+       "fiber_g": <source.items[i].fiber_g>
+     }
+   Do NOT re-estimate. The numbers are right there in userContext.
+3. Set the response "date" field to the TARGET day's YYYY-MM-DD.
+4. Set "intent": "meal", "confidence": 0.9, "summary": one short confirmation.
+5. If source has multiple meals and user wants the whole day copied, FLATTEN
+   all items from all source meals into the single items array.
+6. For partial copies ("same lunch as yesterday"), filter source meals by
+   mealType before copying.
 
-If the source day has no entries, set intent to "ambiguous" and ask plainly:
-"I don't see anything logged for yesterday — what did you have?"
+Example:
+- userContext.yesterdayMeals = [] (empty)
+- userContext.todayMeals = [{ id: 1, mealType: "lunch", items: [
+    {name:"chicken", portion:"4 oz", calories:180, protein_g:35, carbs_g:0, fat_g:4, fiber_g:0},
+    {name:"rice", portion:"1 cup", calories:200, protein_g:4, carbs_g:45, fat_g:0, fiber_g:1}
+  ], totalCal: 380 }]
+- User: "yesterday I had the same as today"
+- Correct response:
+  {
+    "intent": "meal", "confidence": 0.9,
+    "date": "<userContext.yesterday>",
+    "summary": "Copied today's meals to yesterday — 380 cal.",
+    "items": [
+      {"name":"chicken","portion":"4 oz","calories":180,"protein_g":35,"carbs_g":0,"fat_g":4,"fiber_g":0},
+      {"name":"rice","portion":"1 cup","calories":200,"protein_g":4,"carbs_g":45,"fat_g":0,"fiber_g":1}
+    ]
+  }
+
+If the source day has NO entries, set intent to "ambiguous" with empty
+items and ask plainly: "I don't see anything logged for today — what did
+you have?"
+
+DO NOT just write a conversational summary that claims you logged something
+without actually populating items. That is the most common failure mode and
+it confuses users.
 
 For "meal" intent, "items" is an array of objects with this shape:
 {
@@ -231,7 +264,7 @@ INTENT RULES:
 - "exercise": user described physical activity they did or are doing. Examples:
   "30 min walk 3mi pace", "ran 5k", "1 hour yoga", "lifted weights for 45 min",
   "biked to work and back", "pickleball for an hour".
-  → IMPORTANT: Calorie Correct logs exercise directly through Coach. There is
+  → IMPORTANT: Calorie Correct logs exercise directly through Cal. There is
     no fitness tracker integration yet. NEVER tell the user to use a wearable
     or that exercise is handled elsewhere — just log it.
 - "weigh_in": user is reporting a weight reading. Examples: "184.2 this morning",
@@ -436,7 +469,7 @@ export default {
       const userContext = body.userContext || {};
       const timeOfDay = body.timeOfDay || 'morning'; // optional client hint
 
-      const greetingSystem = `You are Coach inside Calorie Correct. The user just opened the app for the first time today — write them a brief greeting.
+      const greetingSystem = `You are Cal inside Calorie Correct. The user just opened the app for the first time today — write them a brief greeting.
 
 Voice & guardrails (same as always):
 - Matter-of-fact, brand-aligned, no pep talks. Treat the user like a smart adult.
@@ -516,7 +549,7 @@ Output rules:
       const base64 = imageData.replace(/^data:image\/[a-z]+;base64,/, '');
       const userContext = body.userContext || null;
 
-      const photoSystem = `You are Coach inside Calorie Correct, looking at a photo of food the user just ate or is about to eat. Identify what's on the plate and estimate portions and macros.
+      const photoSystem = `You are Cal inside Calorie Correct, looking at a photo of food the user just ate or is about to eat. Identify what's on the plate and estimate portions and macros.
 
 ${SYSTEM_PROMPT.split('RESPONSE FORMAT')[1] ? '' : ''}
 
@@ -706,10 +739,13 @@ SUMMARY for photo meals:
       }
 
       // Normalize the response shape so the frontend can rely on it.
+      // NOTE: top-level `date` is preserved — used for copy/back-log patterns
+      // ("yesterday I had the same as today" → meal intent with date=yesterday).
       const result = {
         intent: parsed.intent || 'question',
         confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.7,
         summary: parsed.summary || '',
+        date: typeof parsed.date === 'string' ? parsed.date : null,
         items: Array.isArray(parsed.items) ? parsed.items : [],
         exercises: Array.isArray(parsed.exercises) ? parsed.exercises : [],
         operations: Array.isArray(parsed.operations) ? parsed.operations : [],
