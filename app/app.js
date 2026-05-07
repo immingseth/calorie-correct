@@ -567,6 +567,46 @@ function wireChatCollapseToggle() {
   });
 }
 
+/* Active Results tab — drives which widget is visible below the chat
+ * (Progress / Accuracy / Trend). Pure CSS toggle; no re-render. The Trend
+ * tab also re-inits Chart.js on activation to handle the case where the
+ * canvas was hidden at first paint. Preference persists across reloads. */
+const STORAGE_RESULTS_TAB_KEY = 'realcal_results_tab';
+const RESULTS_TABS = [
+  { id: 'progress', label: 'Progress' },
+  { id: 'accuracy', label: 'Accuracy' },
+  { id: 'trend',    label: 'Trend' },
+];
+
+function getActiveResultsTab() {
+  try {
+    const t = localStorage.getItem(STORAGE_RESULTS_TAB_KEY);
+    if (RESULTS_TABS.some(x => x.id === t)) return t;
+  } catch (e) {}
+  return 'progress';
+}
+function setActiveResultsTab(tabId) {
+  try { localStorage.setItem(STORAGE_RESULTS_TAB_KEY, tabId); } catch (e) {}
+  applyResultsTab(tabId);
+}
+function applyResultsTab(tabId) {
+  const container = document.getElementById('results-tabs-container');
+  if (container) {
+    RESULTS_TABS.forEach(t => container.classList.remove(`tab-${t.id}`));
+    container.classList.add(`tab-${tabId}`);
+  }
+  document.querySelectorAll('[data-results-tab]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.resultsTab === tabId);
+  });
+  // Trend chart needs the canvas to have a measurable layout before Chart.js
+  // can size correctly; re-init when this tab becomes active.
+  if (tabId === 'trend' && typeof renderProgressChart === 'function') {
+    setTimeout(() => {
+      try { renderProgressChart(state, getCalibration(state), progressRange); } catch (e) {}
+    }, 10);
+  }
+}
+
 /* Chat history toggle — by default we only show the most recent turn so the
  * conversation doesn't dominate the view. The user can expand to see the
  * full session's history. Preference persists across reloads.
@@ -3289,6 +3329,7 @@ function renderApp() {
   const totalLoss = startW - currentW;
   const days = state.weights.length > 1 ? daysBetween(state.weights[0].date, state.weights[state.weights.length - 1].date) : 0;
   const progress = getGoalProgress(state);
+  const activeResultsTab = getActiveResultsTab();
 
   // Coach-first: seed proactive greeting once per day
   if (isToday) seedDailyGreetingIfNeeded();
@@ -3313,25 +3354,33 @@ function renderApp() {
         </div>
       </div>
 
-      ${renderProgressCard(progress)}
+      <div class="results-tabs-container tab-${activeResultsTab}" id="results-tabs-container">
+        <div data-results-widget="progress">
+          ${renderProgressCard(progress)}
+        </div>
 
-      ${renderAccuracyCard(state)}
+        <div data-results-widget="accuracy">
+          ${renderAccuracyCard(state)}
+        </div>
 
-      <div class="chart-card">
-        <div class="date-range-row">
-          <div class="bar-chart-legend">
-            <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
-            <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
-            <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
-          </div>
-          <div class="date-range-tabs" id="progress-range-tabs">
-            <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
-            <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
-            <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
-            <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
+        <div data-results-widget="trend">
+          <div class="chart-card">
+            <div class="date-range-row">
+              <div class="bar-chart-legend">
+                <span><span class="swatch" style="background:var(--primary)"></span>Daily</span>
+                <span><span class="swatch" style="background:var(--primary-dark)"></span>7-day average</span>
+                <span><span class="swatch" style="background:var(--muted-soft)"></span>Goal</span>
+              </div>
+              <div class="date-range-tabs" id="progress-range-tabs">
+                <button class="date-range-tab ${progressRange === 7 ? 'active' : ''}" data-range="7">7D</button>
+                <button class="date-range-tab ${progressRange === 30 ? 'active' : ''}" data-range="30">30D</button>
+                <button class="date-range-tab ${progressRange === 90 ? 'active' : ''}" data-range="90">90D</button>
+                <button class="date-range-tab ${progressRange === 0 ? 'active' : ''}" data-range="0">ALL</button>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
           </div>
         </div>
-        <div class="chart-canvas-wrap"><canvas id="progress-chart"></canvas></div>
       </div>
     </div>
   `;
@@ -3386,6 +3435,23 @@ function renderApp() {
   centerC.querySelectorAll('[data-range]').forEach(btn => btn.addEventListener('click', (e) => { progressRange = parseInt(e.currentTarget.dataset.range); renderApp(); }));
   wireAccuracyCard();
   wireChatStrip();
+
+  // Render the Results menu in the left sidebar — buttons that switch which
+  // widget shows below the chat. Pure CSS class swap via applyResultsTab.
+  const menuC = document.getElementById('results-menu');
+  if (menuC) {
+    menuC.innerHTML = `
+      <div class="results-menu-eyebrow">Results</div>
+      ${RESULTS_TABS.map(t => `
+        <button class="results-menu-btn ${t.id === activeResultsTab ? 'active' : ''}" data-results-tab="${t.id}">
+          ${t.label}
+        </button>
+      `).join('')}
+    `;
+    menuC.querySelectorAll('[data-results-tab]').forEach(btn => {
+      btn.addEventListener('click', () => setActiveResultsTab(btn.dataset.resultsTab));
+    });
+  }
 
   // Render the trend chart (after DOM is in)
   setTimeout(() => { renderProgressChart(state, cal, progressRange); }, 10);
