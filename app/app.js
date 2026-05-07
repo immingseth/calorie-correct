@@ -988,6 +988,15 @@ function todayISO() {
   return formatDateISO(d);
 }
 
+/* True if `s` looks like a real YYYY-MM-DD date that Date can parse. Used
+ * to validate date fields Coach sends so a malformed string falls back to today. */
+function isValidISODate(s) {
+  if (typeof s !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const t = Date.parse(s + 'T00:00:00');
+  return !isNaN(t);
+}
+
 function formatDateISO(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -2460,6 +2469,50 @@ function buildUserContext(s) {
     ingredients: (r.items || []).map(i => i.name).filter(Boolean).join(', ').slice(0, 120),
   }));
 
+  // Today's macros summed across all logged meals — Coach can answer
+  // "how's my protein?" without needing to introspect every meal entry.
+  const todayMacros = { protein: 0, carbs: 0, fat: 0, fiber: 0 };
+  for (const m of (s.meals || [])) {
+    if (m.date !== today) continue;
+    for (const i of (m.items || [])) {
+      todayMacros.protein += parseFloat(i.protein_g) || 0;
+      todayMacros.carbs   += parseFloat(i.carbs_g)   || 0;
+      todayMacros.fat     += parseFloat(i.fat_g)     || 0;
+      todayMacros.fiber   += parseFloat(i.fiber_g)   || 0;
+    }
+  }
+  Object.keys(todayMacros).forEach(k => { todayMacros[k] = Math.round(todayMacros[k]); });
+
+  // Today's water intake (oz) so Coach can answer "how much water have I had?"
+  const todayWaterOz = (s.water || [])
+    .filter(w => w.date === today)
+    .reduce((sum, w) => sum + (parseInt(w.oz) || 0), 0);
+
+  // TDEE estimate for today: BMR × activity multiplier + tracker-discounted
+  // exercise burn. Today's net deficit = TDEE − intake (positive means deficit).
+  const bmr = Math.round(mifflinStJeor(s.user, currentW));
+  const activityMult = getActivityMultiplier(s.user.activityLevel || 'light');
+  const todayTDEE = Math.round(bmr * activityMult + todayBurnCalDisplayed);
+  const todayNetDeficit = todayIntake > 0 ? Math.round(todayTDEE - todayIntake) : null;
+
+  // Projected goal date — only meaningful if user is actively losing.
+  // Uses observed 7-day rate (rate7), not target rate.
+  let projectedGoalDate = null;
+  let weeksToGoal = null;
+  const lbsToGo = Math.round((currentW - s.user.goalWeight) * 10) / 10;
+  if (rate7 != null && rate7 > 0.1 && lbsToGo > 0) {
+    weeksToGoal = Math.round((lbsToGo / rate7) * 10) / 10;
+    const dt = new Date(Date.now() + weeksToGoal * 7 * 86400000);
+    projectedGoalDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+
+  // Yesterday's ISO so Coach can resolve "yesterday" without timezone mistakes.
+  const yISO = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
   return {
     name: s.user.name,
     sex: s.user.sex,
@@ -2468,16 +2521,27 @@ function buildUserContext(s) {
     startWeight: s.user.startWeight,
     currentWeight: Math.round(currentW * 10) / 10,
     goalWeight: s.user.goalWeight,
+    lbsToGoal: lbsToGo,
     totalLossLb: Math.round(totalLoss * 10) / 10,
     rate7DayLbPerWk: rate7 != null ? Math.round(rate7 * 100) / 100 : null,
     targetLossRateLbPerWk: s.user.targetLossRate,
+    activityLevel: s.user.activityLevel || 'light',
+    bmrCal: bmr,
+    today,
+    yesterday: yISO,
     dailyTargetCal: target,
     todayIntakeCal: todayIntake,
     todayBurnCalRaw,
     todayBurnCalDisplayed,
+    todayTDEE,
+    todayNetDeficit,
+    todayMacros,
+    todayWaterOz,
     todayMeals,
     todayExercises,
     recipes,
+    weeksToGoal,
+    projectedGoalDate,
     daysOfData: (s.weights || []).length,
     calibrationReady: !!cal.ready,
     observedAccuracyPct: (cal.ready && cal.trackingAccuracy != null) ? Math.round(cal.trackingAccuracy * 100) : null,
@@ -2894,9 +2958,12 @@ function wireChatStrip() {
         const remote = await coachRespondRemote(text, turnId);
 
         if (remote && remote.intent === 'meal' && remote.confidence >= 0.6 && Array.isArray(remote.items) && remote.items.length > 0) {
-          // Meal log via Claude — items have macros + fiber
+          // Meal log via Claude — items have macros + fiber. Coach may
+          // optionally include a date (e.g. when user said "yesterday's lunch");
+          // we honor that date if it's a valid ISO, else fall back to today.
           const now = new Date();
           const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          const dateForLog = isValidISODate(remote.date) ? remote.date : getSelectedDate();
           const items = remote.items.map(it => ({
             name: it.name || 'item',
             portion: it.portion || '',
@@ -2910,7 +2977,7 @@ function wireChatStrip() {
           const totalCal = items.reduce((s, x) => s + x.calories, 0);
           const meal = {
             id: Date.now(),
-            date: getSelectedDate(),
+            date: dateForLog,
             time,
             mealType: guessMealType(now.getHours()),
             raw: text,
@@ -2919,21 +2986,24 @@ function wireChatStrip() {
             source: 'claude',
           };
           state.meals.push(meal);
+          state.meals.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
           recordAction({ type: 'create-meal', meal });
           saveState();
           // Use Claude's summary as Coach's reply (already brand-aligned)
-          resolveChatTurn(turnId, remote.summary || coachLogResponse(meal, getSelectedDate()), 'log');
+          resolveChatTurn(turnId, remote.summary || coachLogResponse(meal, dateForLog), 'log');
         } else if (remote && remote.intent === 'exercise' && remote.confidence >= 0.6 && Array.isArray(remote.exercises) && remote.exercises.length > 0) {
-          // Exercise log via Claude — one or more activities, each becomes its own entry
+          // Exercise log via Claude — one or more activities. Each can carry
+          // its own optional date (Coach: "I ran yesterday and walked today").
           const now = new Date();
           const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          const defaultDate = isValidISODate(remote.date) ? remote.date : getSelectedDate();
           const baseId = Date.now();
           const created = [];
           remote.exercises.forEach((ex, idx) => {
             const typeRec = getExerciseTypeById(ex.type);
             const exercise = {
               id: baseId + idx,
-              date: getSelectedDate(),
+              date: isValidISODate(ex.date) ? ex.date : defaultDate,
               time,
               type: typeRec.id,
               typeName: typeRec.name,
@@ -2950,6 +3020,58 @@ function wireChatStrip() {
           state.exercises.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
           saveState();
           resolveChatTurn(turnId, remote.summary || `Logged ${created.length} activit${created.length === 1 ? 'y' : 'ies'}.`, 'log');
+        } else if (remote && remote.intent === 'weigh_in' && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
+          // Coach is logging a weight — single weight per date, replacing if
+          // there's already one. Coach can include a date (e.g. "184 yesterday morning").
+          const applied = [];
+          for (const op of remote.operations) {
+            if (op.action !== 'weigh_in') continue;
+            const w = parseFloat(op.weight);
+            if (isNaN(w) || w < 50 || w > 600) continue;
+            const date = isValidISODate(op.date) ? op.date : todayISO();
+            const existingIdx = state.weights.findIndex(x => x.date === date);
+            if (existingIdx >= 0) {
+              const before = { ...state.weights[existingIdx] };
+              state.weights[existingIdx].weight = w;
+              recordAction({ type: 'edit-weight', weight: { date, weight: w }, before });
+            } else {
+              const entry = { date, weight: w };
+              state.weights.push(entry);
+              recordAction({ type: 'create-weight', weight: entry });
+            }
+            applied.push({ date, weight: w });
+          }
+          if (applied.length > 0) {
+            state.weights.sort((a, b) => a.date.localeCompare(b.date));
+            saveState();
+            const last = applied[applied.length - 1];
+            toast(`Weight logged: ${last.weight.toFixed(1)} lb`, { undo: true });
+            resolveChatTurn(turnId, remote.summary || `Logged ${last.weight.toFixed(1)} lb for ${last.date}.`, 'log');
+          } else {
+            resolveChatTurn(turnId, remote.summary || "I didn't get a usable weight from that — try \"184.2 lbs this morning\".", 'coach');
+          }
+        } else if (remote && remote.intent === 'log_water' && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
+          // Water log — additive (multiple entries per day are fine).
+          if (!Array.isArray(state.water)) state.water = [];
+          const now = new Date();
+          const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          let totalOz = 0;
+          for (const op of remote.operations) {
+            if (op.action !== 'log_water') continue;
+            const oz = parseInt(op.ounces);
+            if (isNaN(oz) || oz <= 0 || oz > 500) continue;
+            const date = isValidISODate(op.date) ? op.date : todayISO();
+            const entry = { id: Date.now() + Math.floor(Math.random() * 1000), date, time, oz };
+            state.water.push(entry);
+            totalOz += oz;
+          }
+          if (totalOz > 0) {
+            saveState();
+            toast(`+${totalOz} oz water`);
+            resolveChatTurn(turnId, remote.summary || `Logged ${totalOz} oz of water.`, 'log');
+          } else {
+            resolveChatTurn(turnId, remote.summary || "I didn't catch how much water — try \"32 oz\" or \"a 16 oz bottle\".", 'coach');
+          }
         } else if (remote && remote.intent === 'log_recipe' && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
           // Coach matched the user's request to one or more existing recipes — log each.
           const logged = [];
