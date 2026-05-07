@@ -3338,6 +3338,11 @@ function renderApp() {
   // On desktop, both render as one column. On mobile, each is wrapped with a
   // data-mobile-tab so CSS can show only the active tab.
   centerC.innerHTML = `
+    <div class="results-banner">
+      <div class="results-banner-num ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
+      <div class="results-banner-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
+    </div>
+
     <div data-mobile-tab="coach">
       ${renderChatStrip({
         placeholder: "Tell Cal what you ate, or ask anything…",
@@ -3346,14 +3351,6 @@ function renderApp() {
     </div>
 
     <div data-mobile-tab="results">
-      <div class="view-header">
-        <div class="view-eyebrow">Results</div>
-        <div class="trend-headline">
-          <div class="trend-bignum ${totalLoss < 0 ? 'gain' : ''}">${totalLoss >= 0 ? '−' : '+'}${Math.abs(totalLoss).toFixed(1)} lbs</div>
-          <div class="trend-bignum-label">${days > 0 ? `since you started, ${days} days ago` : 'starting line'}</div>
-        </div>
-      </div>
-
       <div class="results-tabs-container tab-${activeResultsTab}" id="results-tabs-container">
         <div data-results-widget="progress">
           ${renderProgressCard(progress)}

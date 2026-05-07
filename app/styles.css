@@ -4339,6 +4339,41 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* =====================================================================
+ * Results banner — total-loss number that sits above the Cal chat at the
+ * top of the center column. Always visible (both Diary and Results mobile
+ * tabs). Smaller and tighter than the old Results-page hero headline.
+ * ===================================================================== */
+.results-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 4px 18px;
+  border-bottom: 1px solid var(--border-soft, #F4EEE3);
+  margin-bottom: 18px;
+}
+.results-banner-num {
+  font-family: var(--serif);
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--primary-dark, #446957);
+  letter-spacing: -1.6px;
+  line-height: 1;
+}
+.results-banner-num.gain { color: var(--accent, #B8855E); }
+.results-banner-label {
+  font-size: 13px;
+  color: var(--muted, #8A8278);
+  letter-spacing: 0.2px;
+}
+
+@media (max-width: 600px) {
+  .results-banner { padding: 2px 2px 14px; margin-bottom: 14px; gap: 10px; }
+  .results-banner-num { font-size: 32px; letter-spacing: -1px; }
+  .results-banner-label { font-size: 12.5px; }
+}
+
+/* =====================================================================
  * Results menu — sidebar list of result tabs (Progress / Accuracy / Trend)
  * Click swaps which widget is visible inside .results-tabs-container below.
  * Pure CSS toggle, no full re-render — see applyResultsTab() in app.js.
