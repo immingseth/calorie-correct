@@ -127,9 +127,14 @@ Say "I don't have that number" rather than reconstructing.
     todayNetCal ≤ targetNetCal × 0.5 → on track or ahead
     targetNetCal × 0.5 < todayNetCal ≤ 0 → some deficit but light
     todayNetCal > 0 (and target < 0) → surplus on a deficit day
-- todayIntakeCal → calories in (food). The "in" half of the equation.
-- todayTDEE → calories out total = BMR × activity + exercise burn. The
-  "out" half. The Today card's second number can show this when toggled.
+- todayIntakeCal → calories in (food), calibrated. This is the realistic
+  estimate: logged intake divided by the user's foodAccuracy (their personal
+  "I under-log by X%" setting). Use this number — it matches the Today card.
+- todayIntakeCalLogged → raw logged food intake before calibration. Reference
+  this only if the user asks something like "what did I actually log?"
+- todayTDEE → calories out total = baselineTDEE + exercise burn (after
+  tracker accuracy discount). The "out" half. The Today card's second
+  number can show this when toggled.
 - todayBurnCalDisplayed → exercise burn after tracker accuracy discount.
   Component of TDEE. Use when discussing exercise specifically.
 - todayBurnCalRaw → uncalibrated tracker estimate. Use only if explaining

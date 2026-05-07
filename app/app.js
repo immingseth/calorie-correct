@@ -2482,7 +2482,14 @@ function buildUserContext(s) {
   const rate7 = get7dRate(s);
   const target = getDailyTarget(s);
   const today = todayISO();
-  const todayIntake = getDailyCalories(s, today);
+  // Apply foodAccuracy to intake so Cal sees the same calibrated number the
+  // Today card displays. Raw value also exposed as todayIntakeCalLogged for
+  // when Cal needs to discuss what the user actually logged vs the estimate.
+  const foodAcc = s.user.foodAccuracy != null ? s.user.foodAccuracy : 1.0;
+  const todayIntakeLogged = getDailyCalories(s, today);
+  const todayIntake = foodAcc > 0 && foodAcc !== 1
+    ? Math.round(todayIntakeLogged / foodAcc)
+    : todayIntakeLogged;
 
   // Compact item shape used inside todayMeals / yesterdayMeals so Coach can
   // copy meals faithfully ("today I had the same as yesterday") without
@@ -2550,6 +2557,8 @@ function buildUserContext(s) {
 
   // Today's macros summed across all logged meals — Coach can answer
   // "how's my protein?" without needing to introspect every meal entry.
+  // Same foodAccuracy calibration as intake so the gram totals match what
+  // the user sees on the Today card.
   const todayMacros = { protein: 0, carbs: 0, fat: 0, fiber: 0 };
   for (const m of (s.meals || [])) {
     if (m.date !== today) continue;
@@ -2559,6 +2568,9 @@ function buildUserContext(s) {
       todayMacros.fat     += parseFloat(i.fat_g)     || 0;
       todayMacros.fiber   += parseFloat(i.fiber_g)   || 0;
     }
+  }
+  if (foodAcc > 0 && foodAcc !== 1) {
+    Object.keys(todayMacros).forEach(k => { todayMacros[k] = todayMacros[k] / foodAcc; });
   }
   Object.keys(todayMacros).forEach(k => { todayMacros[k] = Math.round(todayMacros[k]); });
 
@@ -2610,6 +2622,7 @@ function buildUserContext(s) {
     yesterday: yesterdayISO,
     dailyTargetCal: target,
     todayIntakeCal: todayIntake,
+    todayIntakeCalLogged: todayIntakeLogged,
     todayBurnCalRaw,
     todayBurnCalDisplayed,
     // Today's energy balance NET — matches what the Today card displays.
@@ -3346,12 +3359,25 @@ function renderApp() {
   const today = todayISO();
   const isToday = date === today;
   const target = getDailyTarget(state);
-  const consumed = getDailyCalories(state, date);
+  // Raw logged values from the diary
+  const consumedLogged = getDailyCalories(state, date);
+  const macrosLogged = getDailyMacros(state, date);
+  // Apply user accuracy sliders so the Today card reflects calibrated reality.
+  // Tracker accuracy < 1 means the tracker over-reports burn — multiply down.
+  // Food accuracy < 1 means the user under-logs intake — divide up.
   const trackerAcc = state.user.trackerAccuracy != null ? state.user.trackerAccuracy : 1.0;
+  const foodAcc = state.user.foodAccuracy != null ? state.user.foodAccuracy : 1.0;
   const burnRaw = getDailyExerciseBurn(state, date);
   const burnAdj = Math.round(burnRaw * trackerAcc);
+  const consumed = foodAcc > 0 ? Math.round(consumedLogged / foodAcc) : consumedLogged;
+  // Macros scale proportionally with the same calibration factor
+  const macros = foodAcc > 0 && foodAcc !== 1 ? {
+    protein: Math.round(macrosLogged.protein / foodAcc),
+    carbs:   Math.round(macrosLogged.carbs   / foodAcc),
+    fat:     Math.round(macrosLogged.fat     / foodAcc),
+    fiber:   Math.round(macrosLogged.fiber   / foodAcc),
+  } : macrosLogged;
   const dayNet = consumed - burnAdj;
-  const macros = getDailyMacros(state, date);
   const water = getDailyWater(state, date);
   const dayEntries = getDayEntries(state, date);
 
