@@ -1320,6 +1320,157 @@ function getAverageDailyCalories(s, fromISO, toISO) {
   return total / days;
 }
 
+/* ===================================================
+   GAP-AWARE TRACKING
+   ===================================================
+   Real users have periods where they don't log — vacation, illness, fell
+   off the wagon, busy week, life. The system handles this automatically:
+   - Single missed days (1-2) are normal noise — calibration silently skips
+     them but otherwise doesn't care.
+   - "Gaps" (3+ consecutive days with no logging) are opaque: weight
+     changes during gaps don't pollute the calibration ratio, and the
+     first SETTLING_WINDOW_DAYS after a gap don't feed calibration either
+     (post-gap weight is volatile from refeed / water / glycogen).
+   - The user never marks anything. They stop logging when life happens
+     and resume when they're ready.
+*/
+const GAP_THRESHOLD_DAYS = 3;
+const SETTLING_WINDOW_DAYS = 3;
+
+/* Walk the user's history from first weight (or first meal) to today.
+ * Identify logged periods and gaps. Returns:
+ *   periods: [{ start, end, days }]
+ *   gaps:    [{ start, end, days }]
+ *   currentlyInGap: bool — trailing unlogged ≥ GAP_THRESHOLD_DAYS
+ *   currentLoggedStreak: int — consecutive logged days ending today
+ *   trailingUnloggedDays: int — unlogged days ending today, regardless of threshold
+ *   settlingDaysLeft: int — if just back from a gap, days until calibration unfreezes
+ */
+function getTrackingPeriods(s) {
+  const meals = s.meals || [];
+  const weights = s.weights || [];
+  const firstISO = (weights[0] && weights[0].date) || (meals[0] && meals[0].date);
+  if (!firstISO) {
+    return {
+      periods: [], gaps: [], currentlyInGap: false,
+      currentLoggedStreak: 0, trailingUnloggedDays: 0, settlingDaysLeft: 0,
+    };
+  }
+
+  // Sum intake by date for fast lookup
+  const intakeByDate = new Map();
+  for (const m of meals) {
+    const cal = (m.totalCal != null) ? m.totalCal : (m.items || []).reduce((acc, x) => acc + (parseInt(x.calories) || 0), 0);
+    intakeByDate.set(m.date, (intakeByDate.get(m.date) || 0) + cal);
+  }
+
+  const todayISOVal = todayISO();
+  const startDate = parseISODate(firstISO);
+  const totalDays = daysBetween(firstISO, todayISOVal) + 1;
+
+  // Day-by-day classification
+  const dayLogged = [];
+  for (let i = 0; i < totalDays; i++) {
+    const d = formatDateISO(new Date(startDate.getTime() + i * 86400000));
+    const intake = intakeByDate.get(d) || 0;
+    dayLogged.push({ date: d, logged: intake >= 100 });
+  }
+
+  // Find gap runs (≥ GAP_THRESHOLD_DAYS consecutive unlogged days)
+  const gaps = [];
+  let runStart = -1;
+  for (let i = 0; i <= dayLogged.length; i++) {
+    const isUnlogged = i < dayLogged.length && !dayLogged[i].logged;
+    if (isUnlogged) {
+      if (runStart < 0) runStart = i;
+    } else if (runStart >= 0) {
+      const runLen = i - runStart;
+      if (runLen >= GAP_THRESHOLD_DAYS) {
+        gaps.push({ start: dayLogged[runStart].date, end: dayLogged[i - 1].date, days: runLen });
+      }
+      runStart = -1;
+    }
+  }
+
+  // Identify logged periods: contiguous stretches between/outside gaps
+  const inGapIdx = (idx) => gaps.some(g => dayLogged[idx].date >= g.start && dayLogged[idx].date <= g.end);
+  const periods = [];
+  let pStart = -1;
+  for (let i = 0; i <= dayLogged.length; i++) {
+    const isInGap = i < dayLogged.length && inGapIdx(i);
+    if (i === dayLogged.length || isInGap) {
+      if (pStart >= 0) {
+        periods.push({ start: dayLogged[pStart].date, end: dayLogged[i - 1].date, days: i - pStart });
+        pStart = -1;
+      }
+    } else {
+      if (pStart < 0) pStart = i;
+    }
+  }
+
+  // Trailing unlogged days (any number, regardless of gap threshold)
+  let trailingUnloggedDays = 0;
+  for (let i = dayLogged.length - 1; i >= 0; i--) {
+    if (!dayLogged[i].logged) trailingUnloggedDays++;
+    else break;
+  }
+  const currentlyInGap = trailingUnloggedDays >= GAP_THRESHOLD_DAYS;
+
+  // Current logged streak (consecutive logged days ending today)
+  let currentLoggedStreak = 0;
+  for (let i = dayLogged.length - 1; i >= 0; i--) {
+    if (dayLogged[i].logged) currentLoggedStreak++;
+    else break;
+  }
+
+  // Settling window: if the current period started right after a gap,
+  // how many days until SETTLING_WINDOW_DAYS is reached?
+  let settlingDaysLeft = 0;
+  if (!currentlyInGap && periods.length > 0) {
+    const lastPeriod = periods[periods.length - 1];
+    const startsAfterGap = gaps.some(g => {
+      const dayAfter = formatDateISO(new Date(parseISODate(g.end).getTime() + 86400000));
+      return dayAfter === lastPeriod.start;
+    });
+    if (startsAfterGap) {
+      const daysIntoPeriod = daysBetween(lastPeriod.start, todayISOVal) + 1;
+      settlingDaysLeft = Math.max(0, SETTLING_WINDOW_DAYS - daysIntoPeriod);
+    }
+  }
+
+  return { periods, gaps, currentlyInGap, currentLoggedStreak, trailingUnloggedDays, settlingDaysLeft };
+}
+
+/* Helper — find the most recent weight on or before a given ISO date. */
+function weightOnOrBefore(s, dateISO) {
+  let result = null;
+  for (const w of (s.weights || [])) {
+    if (w.date <= dateISO) result = w.weight;
+    else break;
+  }
+  return result;
+}
+
+/* Helper — find the earliest weight on or after a given ISO date. */
+function weightOnOrAfter(s, dateISO) {
+  for (const w of (s.weights || [])) {
+    if (w.date >= dateISO) return w.weight;
+  }
+  return null;
+}
+
+/* True if dateISO falls within the SETTLING_WINDOW_DAYS following any gap.
+ * Used by calibration to skip volatile post-gap days from predicted-loss math. */
+function isInSettlingWindow(dateISO, gaps) {
+  for (const g of gaps) {
+    const dayAfterGap = parseISODate(g.end).getTime() + 86400000;
+    const settlingEndDate = parseISODate(g.end).getTime() + SETTLING_WINDOW_DAYS * 86400000;
+    const dayMs = parseISODate(dateISO).getTime();
+    if (dayMs >= dayAfterGap && dayMs <= settlingEndDate) return true;
+  }
+  return false;
+}
+
 function getCalibration(s) {
   const w = s.weights;
   if (w.length < 7) return { ready: false };
@@ -1331,15 +1482,34 @@ function getCalibration(s) {
 
   const startW = w[0].weight;
   const endW = smoothedRecentWeight(s);
-  const actualLoss = startW - endW;
+  const rawActualLoss = startW - endW;
+
+  // === GAP-AWARE CALIBRATION ===
+  // Identify gaps (3+ unlogged days). Subtract weight changes that happened
+  // DURING gaps from actualLoss so the ratio only reflects logged-period
+  // weight movement. Skip post-gap settling-window days (3 days) from
+  // predicted-loss accumulation since fresh-back weight is volatile.
+  const trackingInfo = getTrackingPeriods(s);
+  const gaps = trackingInfo.gaps;
+
+  let gapWeightChange = 0; // weight lost during gap periods (positive = lost)
+  for (const g of gaps) {
+    const wBefore = weightOnOrBefore(s, g.start);
+    const wAfter = weightOnOrAfter(s, g.end);
+    if (wBefore != null && wAfter != null) {
+      gapWeightChange += wBefore - wAfter;
+    }
+  }
+  // Adjusted loss reflects only logged-period weight movement
+  const actualLoss = rawActualLoss - gapWeightChange;
 
   const avgLogged = getAverageDailyCalories(s, startISO, endISO);
   if (avgLogged < 100) return { ready: false };
 
   // === PER-DAY CALIBRATION ===
-  // Walk every day in the period. For each day with intake data, compute
-  // expected deficit using THAT day's intake and THAT day's exercise burn.
-  // Sum these to get the total predicted weight change in lbs.
+  // Walk every day. For days with intake data that aren't inside a settling
+  // window, compute expected deficit and accumulate. Days inside gaps are
+  // already skipped by the intake < 100 check.
   const bmr = mifflinStJeor(s.user, endW);
   const startDate = parseISODate(startISO);
   const endDate = parseISODate(endISO);
@@ -1351,10 +1521,10 @@ function getCalibration(s) {
   let totalBurnOnLoggedDays = 0;
   let totalPredictedDeficit = 0;
   let daysWithIntake = 0;
+  let daysSkippedSettling = 0;
 
   // Choose baseline: with exercise tracked → sedentary BMR (since EAT is explicit)
   //                  without exercise tracked → BMR × activity_mult (absorbs typical EAT)
-  // We decide AFTER the loop, but pre-check existence:
   const totalLoggedBurn = (s.exercises || [])
     .filter(e => e.date >= startISO && e.date <= endISO)
     .reduce((sum, e) => sum + (e.caloriesBurned || 0), 0);
@@ -1367,10 +1537,11 @@ function getCalibration(s) {
     const dateISO = formatDateISO(new Date(startDate.getTime() + i * 86400000));
     const dailyIntake = getDailyCalories(s, dateISO);
     const dailyBurnRaw = exerciseTracked ? getDailyExerciseBurn(s, dateISO) : 0;
-    const dailyBurn = dailyBurnRaw * trackerAcc; // apply user's tracker discount
-    if (dailyIntake < 100) continue; // skip days without intake data
+    const dailyBurn = dailyBurnRaw * trackerAcc;
+    if (dailyIntake < 100) continue; // skip unlogged days (covers gaps)
+    if (isInSettlingWindow(dateISO, gaps)) { daysSkippedSettling++; continue; }
     const dailyTDEE = baselineRestingTDEE + dailyBurn;
-    const dailyDeficit = dailyTDEE - dailyIntake; // positive = deficit
+    const dailyDeficit = dailyTDEE - dailyIntake;
     totalPredictedDeficit += dailyDeficit;
     totalIntakeOnLoggedDays += dailyIntake;
     totalBurnOnLoggedDays += dailyBurn;
@@ -1415,7 +1586,10 @@ function getCalibration(s) {
     ready: true,
     days,
     daysWithIntake,
+    daysSkippedSettling,
     actualLoss,
+    rawActualLoss,
+    gapWeightChange,
     predictedLoss,
     avgLogged: Math.round(avgIntakePerDay),
     avgBurn: Math.round(avgBurnPerDay),
@@ -1427,6 +1601,7 @@ function getCalibration(s) {
     realIntake: Math.round(realIntake / 10) * 10,
     dailyTarget: dailyTargetClamped,
     underLogPct: Math.round((calibrationFactor - 1) * 100),
+    gaps: gaps.length, // count of gaps in the period
   };
 }
 
@@ -1489,7 +1664,19 @@ function getDataInRange(s, days) {
 
 // 7-day weight loss rate in lb/wk based on linear regression of recent weights
 function get7dRate(s) {
-  const recent = s.weights.slice(-14); // use 14 days for stability, scale to 7
+  // Gap-aware: only use weights from the current logged period, so a vacation
+  // or fall-off-the-wagon period in the middle doesn't skew the slope.
+  const ti = getTrackingPeriods(s);
+  let recent;
+  if (ti.currentlyInGap || ti.periods.length === 0) {
+    // No active logged period — rate is paused.
+    return null;
+  }
+  const currentPeriod = ti.periods[ti.periods.length - 1];
+  // Pull all weights inside the current logged period, then use the trailing
+  // 14 (or however many we have, min 4) for slope calculation.
+  const periodWeights = (s.weights || []).filter(w => w.date >= currentPeriod.start && w.date <= currentPeriod.end);
+  recent = periodWeights.slice(-14);
   if (recent.length < 4) return null;
   const xs = recent.map((_, i) => i);
   const ys = recent.map(w => w.weight);
@@ -2649,6 +2836,22 @@ function buildUserContext(s) {
     observedAccuracyPct: (cal.ready && cal.trackingAccuracy != null) ? Math.round(cal.trackingAccuracy * 100) : null,
     trackerAccuracyPct: Math.round((s.user.trackerAccuracy || 0.7) * 100),
     foodAccuracyPct: Math.round((s.user.foodAccuracy || 0.85) * 100),
+    // Gap-aware tracking — Cal uses these to handle missed days gracefully.
+    // currentLoggedStreak: consecutive logged days ending today.
+    // trailingUnloggedDays: 1+ unlogged days ending today (any number).
+    // inActiveGap: trailing unlogged ≥ 3 days (calibration is paused).
+    // settlingDaysLeft: if just back from a gap, days until calibration unfreezes.
+    // recentGaps: last few notable gaps in the user's history.
+    ...(function() {
+      const ti = getTrackingPeriods(s);
+      return {
+        currentLoggedStreak: ti.currentLoggedStreak,
+        trailingUnloggedDays: ti.trailingUnloggedDays,
+        inActiveGap: ti.currentlyInGap,
+        settlingDaysLeft: ti.settlingDaysLeft,
+        recentGaps: ti.gaps.slice(-5).map(g => ({ start: g.start, end: g.end, days: g.days })),
+      };
+    })(),
   };
 }
 
