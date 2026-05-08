@@ -846,6 +846,8 @@ function migrateState(s) {
     s.recipes = Array.isArray(s.savedMeals) ? s.savedMeals : [];
   }
   delete s.savedMeals;
+  // Cal memory — short notes the user wants Cal to remember across sessions.
+  if (!Array.isArray(s.user.memories)) s.user.memories = [];
   // Upgrade legacy recipe item shape (just {name, calories}) to include macros
   // + portion so newly-logged-from-recipe meals have the same shape as Claude
   // meal logs. Old recipes will still work; macros default to 0.
@@ -2580,6 +2582,68 @@ function seedDailyGreetingIfNeeded() {
 
 /* Build a compact user-context snapshot the Worker passes to Claude in the
  * system prompt. Keep it short — token cost grows fast otherwise. */
+/* ============================================================
+   CAL MEMORY — persistent notes Cal remembers across sessions.
+   Things like "I bike 3-4 days a week", "training for marathon in October",
+   "allergic to peanuts". The user adds them via chat ("remember that…")
+   or via Settings, and Cal reads them in userContext on every message.
+   Capped at MEMORY_LIMIT to keep prompt size reasonable.
+   ============================================================ */
+const MEMORY_LIMIT = 50;
+const MEMORY_TEXT_MAX = 200;
+
+function addMemory(text) {
+  const trimmed = String(text || '').trim().slice(0, MEMORY_TEXT_MAX);
+  if (!trimmed) return null;
+  if (!Array.isArray(state.user.memories)) state.user.memories = [];
+  // De-duplicate (case-insensitive) — if the same text already exists, no-op
+  const existing = state.user.memories.find(m => m.text.toLowerCase() === trimmed.toLowerCase());
+  if (existing) return existing;
+  const memory = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    text: trimmed,
+    createdAt: todayISO(),
+  };
+  state.user.memories.unshift(memory);
+  // Trim oldest if we exceed the limit
+  if (state.user.memories.length > MEMORY_LIMIT) {
+    state.user.memories = state.user.memories.slice(0, MEMORY_LIMIT);
+  }
+  saveState();
+  return memory;
+}
+
+function removeMemory(id) {
+  if (!Array.isArray(state.user.memories)) return false;
+  const before = state.user.memories.length;
+  state.user.memories = state.user.memories.filter(m => m.id !== id);
+  saveState();
+  return before > state.user.memories.length;
+}
+
+/* Best-effort fuzzy match: find a memory whose text contains all words in the
+ * query (case-insensitive). Used when Cal says "forget the marathon thing"
+ * and we need to figure out which memory id to delete. */
+function findMemoryByText(query) {
+  if (!Array.isArray(state.user.memories)) return null;
+  const q = String(query || '').toLowerCase().trim();
+  if (!q) return null;
+  const words = q.split(/\s+/).filter(w => w.length >= 3);
+  if (words.length === 0) return null;
+  // Score: how many query words appear in the memory text
+  let best = null;
+  let bestScore = 0;
+  for (const m of state.user.memories) {
+    const text = m.text.toLowerCase();
+    let score = 0;
+    for (const w of words) {
+      if (text.includes(w)) score++;
+    }
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  return bestScore >= Math.max(1, Math.floor(words.length / 2)) ? best : null;
+}
+
 /* Apply one Coach-issued edit or delete operation against state. Returns a
  * descriptor of what happened ({kind, label}) for building the toast/reply,
  * or null if the op was malformed or the target couldn't be found. Caller is
@@ -2836,6 +2900,11 @@ function buildUserContext(s) {
     observedAccuracyPct: (cal.ready && cal.trackingAccuracy != null) ? Math.round(cal.trackingAccuracy * 100) : null,
     trackerAccuracyPct: Math.round((s.user.trackerAccuracy || 0.7) * 100),
     foodAccuracyPct: Math.round((s.user.foodAccuracy || 0.85) * 100),
+    // Cal memory — persistent notes the user has asked Cal to remember.
+    // Cal references these naturally when relevant; user manages via chat
+    // ("remember that I bike 3-4 days a week" / "forget the marathon thing")
+    // or Settings → Cal Memory.
+    memories: (s.user.memories || []).map(m => ({ id: m.id, text: m.text, addedDate: m.createdAt })),
     // Gap-aware tracking — Cal uses these to handle missed days gracefully.
     // currentLoggedStreak: consecutive logged days ending today.
     // trailingUnloggedDays: 1+ unlogged days ending today (any number).
@@ -3446,6 +3515,36 @@ function wireChatStrip() {
             resolveChatTurn(turnId, remote.summary || `Saved ${noun}.`, 'log');
           } else {
             resolveChatTurn(turnId, remote.summary || "I couldn't build that recipe — try giving me the ingredients.", 'coach');
+          }
+        } else if (remote && remote.intent === 'remember' && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
+          // Cal memory — add or remove persistent notes
+          const added = [];
+          const removed = [];
+          for (const op of remote.operations) {
+            if (op.action === 'add') {
+              const text = (op.text || '').trim();
+              if (!text) continue;
+              const memory = addMemory(text);
+              if (memory) added.push(memory);
+            } else if (op.action === 'remove') {
+              if (op.id != null) {
+                if (removeMemory(parseInt(op.id))) removed.push({ id: op.id });
+              } else if (op.text) {
+                // Cal may pass the matching text instead of id — fuzzy-match
+                const found = findMemoryByText(op.text);
+                if (found && removeMemory(found.id)) removed.push(found);
+              }
+            }
+          }
+          const totalChanges = added.length + removed.length;
+          if (totalChanges > 0) {
+            const verb = added.length > 0 && removed.length === 0 ? 'Remembered'
+                       : removed.length > 0 && added.length === 0 ? 'Forgot'
+                       : 'Updated memory';
+            toast(`${verb} · ${totalChanges} note${totalChanges === 1 ? '' : 's'}`);
+            resolveChatTurn(turnId, remote.summary || `${verb} that.`, 'log');
+          } else {
+            resolveChatTurn(turnId, remote.summary || "I couldn't update memory — try rephrasing?", 'coach');
           }
         } else if (remote && (remote.intent === 'delete' || remote.intent === 'edit') && remote.confidence >= 0.6 && Array.isArray(remote.operations) && remote.operations.length > 0) {
           // Coach edit/delete — apply each operation against today's log and
@@ -4425,6 +4524,61 @@ function wireRecipesRow() {
 
 /* Recipes manager — list of all saved recipes with edit/delete + new-recipe.
  * Opens from the + button in the chat strip's recipes row. */
+/* Cal memory manager — list of persistent notes Cal remembers about the user.
+ * Add via the input at the bottom; remove via the × on each row. */
+function openMemoryModal() {
+  const modal = document.getElementById('modal');
+  const memories = state.user.memories || [];
+  modal.className = 'modal modal-wide';
+  modal.innerHTML = `<div class="modal-h">Cal memory</div>
+    <div class="modal-sub">Things Cal remembers about you across sessions. Tip: in chat, you can also say "remember that I bike 3-4 days a week" or "forget the marathon thing".</div>
+
+    <div class="memory-list" id="memory-list">
+      ${memories.length === 0
+        ? `<div class="memory-empty">Cal doesn't have any notes yet. Add one below, or tell Cal in chat: <em>"remember that..."</em></div>`
+        : memories.map(m => `
+          <div class="memory-row" data-memory-id="${m.id}">
+            <div class="memory-row-text">${escapeAttr(m.text)}</div>
+            <div class="memory-row-meta">added ${m.createdAt}</div>
+            <button class="memory-row-delete" data-memory-delete="${m.id}" title="Forget">×</button>
+          </div>
+        `).join('')}
+    </div>
+
+    <div class="memory-add-row">
+      <input class="memory-add-input" id="memory-add-input" placeholder="Add a note (e.g. I bike 3-4 days a week)" maxlength="${MEMORY_TEXT_MAX}" />
+      <button class="btn btn-secondary btn-sm" id="memory-add-btn">Add</button>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="modal-cancel">Close</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
+  document.querySelectorAll('[data-memory-delete]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.memoryDelete);
+      removeMemory(id);
+      closeModal();
+      setTimeout(openMemoryModal, 120);
+    });
+  });
+
+  const input = document.getElementById('memory-add-input');
+  const addBtn = document.getElementById('memory-add-btn');
+  const submit = () => {
+    const text = (input.value || '').trim();
+    if (!text) { toast('Add a note first'); return; }
+    addMemory(text);
+    closeModal();
+    setTimeout(openMemoryModal, 120);
+  };
+  if (addBtn) addBtn.addEventListener('click', submit);
+  if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  setTimeout(() => input && input.focus(), 50);
+}
+
 function openRecipesModal() {
   const modal = document.getElementById('modal');
   const recipes = (state.recipes || []).slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -5580,6 +5734,14 @@ function openSettings() {
         <button class="btn btn-secondary btn-sm" id="settings-recipes-btn">Manage</button>
       </div>
 
+      <div class="settings-item">
+        <div>
+          <div class="settings-item-label">Cal memory · ${(state.user.memories || []).length}</div>
+          <div class="settings-item-detail">Notes Cal remembers about you across sessions.</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="settings-memory-btn">Manage</button>
+      </div>
+
       <div class="settings-item-stack">
         <div class="settings-item-head">
           <div class="settings-item-label">Export your data</div>
@@ -5668,6 +5830,11 @@ function openSettings() {
   if (recipesBtn) recipesBtn.addEventListener('click', () => {
     closeModal();
     setTimeout(openRecipesModal, 120);
+  });
+  const memoryBtn = document.getElementById('settings-memory-btn');
+  if (memoryBtn) memoryBtn.addEventListener('click', () => {
+    closeModal();
+    setTimeout(openMemoryModal, 120);
   });
 }
 

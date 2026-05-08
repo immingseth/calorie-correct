@@ -4484,6 +4484,97 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* =====================================================================
+ * Cal memory — manager modal (Settings → Cal memory)
+ * Persistent notes Cal references across sessions ("I bike 3-4 days/wk").
+ * ===================================================================== */
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 8px 0 12px;
+  padding-right: 4px;
+}
+.memory-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted, #8A8278);
+  background: var(--primary-soft, #EAF0EC);
+  border-radius: 12px;
+  line-height: 1.5;
+}
+.memory-empty em {
+  color: var(--primary-dark, #446957);
+  font-style: italic;
+}
+.memory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 12px;
+}
+.memory-row-text {
+  flex: 1 1 auto;
+  font-size: 14px;
+  color: var(--text, #1c2a23);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.memory-row-meta {
+  font-size: 11px;
+  color: var(--muted, #8A8278);
+  flex: 0 0 auto;
+  margin-top: 2px;
+  font-style: italic;
+}
+.memory-row-delete {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #8A8278);
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.memory-row-delete:hover { background: #fcf0ed; color: #b54b3a; }
+
+.memory-add-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+.memory-add-input {
+  flex: 1 1 auto;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text, #1c2a23);
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.memory-add-input:focus {
+  outline: none;
+  border-color: var(--primary, #769B6C);
+  box-shadow: 0 0 0 3px rgba(118, 155, 108, 0.15);
+}
+
+@media (max-width: 600px) {
+  .memory-row { flex-wrap: wrap; }
+  .memory-row-meta { width: 100%; order: 3; margin-top: 4px; }
+}
+
+/* =====================================================================
  * Recipes — chat strip row + manager modal + edit modal
  * ===================================================================== */
 
