@@ -50,3 +50,8 @@ worker/dist/
 .env.local
 *.key
 *.pem
+
+# Personal API keys / IDs registry — local reference only, never share or commit
+API_KEYS.md
+KEYS.md
+secrets.md

@@ -3,4 +3,19 @@ main = "index.js"
 compatibility_date = "2026-05-01"
 
 # The free tier gives us 100K req/day. Plenty for our scale.
-# ANTHROPIC_API_KEY is set via `wrangler secret put` — never committed.
+# Secrets are set via `wrangler secret put` — never committed:
+#   ANTHROPIC_API_KEY        — Claude API
+#   RESEND_API_KEY           — magic-link email
+#   GOOGLE_CLIENT_ID         — Google OAuth
+#   GOOGLE_CLIENT_SECRET     — Google OAuth
+#   SESSION_SECRET           — HMAC for signed cookies (32-byte random hex)
+
+# D1 database — stores users, sessions, magic-link tokens, and synced state.
+# In Worker code, accessed as `env.DB`. Free tier covers our scale (~5GB,
+# 25M reads/day, 50K writes/day).
+[[d1_databases]]
+binding = "DB"
+database_name = "calorie-correct-db"
+database_id = "9eb08f22-b875-4497-90bb-3743c53cb888"
+# Migrations directory — wrangler d1 migrations apply reads from here.
+migrations_dir = "migrations"

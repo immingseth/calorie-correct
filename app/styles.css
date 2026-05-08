@@ -4894,6 +4894,145 @@ input[type="range"]::-moz-range-thumb {
 .csv-mode-title { font-size: 14px; font-weight: 600; color: var(--text, #1c2a23); margin-bottom: 2px; }
 .csv-mode-detail { font-size: 12px; color: var(--muted, #8A8278); line-height: 1.4; }
 
+/* =====================================================================
+ * Sign-in modal — Google OAuth + email magic-link.
+ * Settings → Account section shows current sign-in state.
+ * ===================================================================== */
+.signin-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text, #1c2a23);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  margin-bottom: 8px;
+}
+.signin-btn:hover {
+  background: var(--primary-soft, #EAF0EC);
+  border-color: var(--primary, #769B6C);
+}
+.signin-google svg { flex: 0 0 auto; }
+
+.signin-divider {
+  position: relative;
+  text-align: center;
+  margin: 14px 0;
+  font-size: 12px;
+  color: var(--muted, #8A8278);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.signin-divider::before, .signin-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: calc(50% - 20px);
+  height: 1px;
+  background: var(--border, #ECE5D8);
+}
+.signin-divider::before { left: 0; }
+.signin-divider::after  { right: 0; }
+.signin-divider span { background: var(--card, #fff); padding: 0 4px; position: relative; }
+
+.signin-email-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.signin-email-input {
+  flex: 1 1 auto;
+  border: 1px solid var(--border, #ECE5D8);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text, #1c2a23);
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.signin-email-input:focus {
+  outline: none;
+  border-color: var(--primary, #769B6C);
+  box-shadow: 0 0 0 3px rgba(118, 155, 108, 0.15);
+}
+.signin-email-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.signin-hint {
+  font-size: 12px;
+  color: var(--muted, #8A8278);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+.signin-hint-err { color: #b54b3a; }
+
+.signin-confirmation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 20px;
+  background: var(--primary-soft, #EAF0EC);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--primary-dark, #446957);
+  margin: 12px 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.signin-confirmation svg { color: var(--primary-dark, #446957); }
+
+/* Settings → Account row when signed in */
+.settings-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--primary-soft, #EAF0EC);
+  border-radius: 12px;
+  margin-bottom: 4px;
+}
+.settings-account-info { flex: 1 1 auto; min-width: 0; }
+.settings-account-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #1c2a23);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-account-email {
+  font-size: 12px;
+  color: var(--text-soft, #4A4540);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+.settings-account-plan {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--primary-dark, #446957);
+  background: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: 6px;
+}
+
 /* Feedback modal — textarea + meta-toggle row */
 .feedback-textarea {
   width: 100%;

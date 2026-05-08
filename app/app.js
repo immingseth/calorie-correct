@@ -478,6 +478,138 @@ const STORAGE_CHAT_KEY = 'realcal_chat_v1'; // last conversation turn — persis
  * the local placeholder responses (offline mode / Worker down). */
 const WORKER_URL = 'https://calorie-correct-coach.calorie-correct.workers.dev';
 
+/* ============================================================
+   AUTH — session token storage + auth helpers
+   ============================================================
+   Bearer token stored in localStorage. Set by auth.html after a successful
+   magic-link or Google OAuth flow. Included as Authorization: Bearer ... on
+   authenticated Worker requests. Anonymous users have no token; the app
+   still works fully via localStorage state.
+*/
+const STORAGE_SESSION_KEY = 'cc_session';
+const STORAGE_AUTH_USER_KEY = 'cc_auth_user_v1'; // cached user info from /api/auth/me
+
+let currentAuthUser = null; // { id, email, name, plan, createdAt } when signed in
+
+function getSessionToken() {
+  try { return localStorage.getItem(STORAGE_SESSION_KEY); } catch (e) { return null; }
+}
+function setSessionToken(token) {
+  try {
+    if (token) localStorage.setItem(STORAGE_SESSION_KEY, token);
+    else localStorage.removeItem(STORAGE_SESSION_KEY);
+  } catch (e) {}
+}
+function getCachedAuthUser() {
+  try {
+    const raw = localStorage.getItem(STORAGE_AUTH_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function setCachedAuthUser(user) {
+  try {
+    if (user) localStorage.setItem(STORAGE_AUTH_USER_KEY, JSON.stringify(user));
+    else localStorage.removeItem(STORAGE_AUTH_USER_KEY);
+  } catch (e) {}
+}
+
+/* Build headers for an authenticated Worker request. Always includes JSON
+ * content-type unless caller overrides. Adds Authorization if signed in. */
+function authHeaders(extra) {
+  const h = { 'Content-Type': 'application/json', ...(extra || {}) };
+  const token = getSessionToken();
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
+}
+
+/* Validate the saved session against the worker. Updates currentAuthUser +
+ * the cached user info, and updates the displayed profile name. If the
+ * token is invalid (expired, revoked), clears local state silently. */
+async function fetchCurrentAuthUser() {
+  const token = getSessionToken();
+  if (!token) {
+    currentAuthUser = null;
+    setCachedAuthUser(null);
+    return null;
+  }
+  try {
+    const res = await fetch(`${WORKER_URL}/api/auth/me`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      // Token bad — sign out silently
+      setSessionToken(null);
+      setCachedAuthUser(null);
+      currentAuthUser = null;
+      return null;
+    }
+    if (!res.ok) return null;
+    const data = await res.json();
+    currentAuthUser = data.user || null;
+    setCachedAuthUser(currentAuthUser);
+    refreshProfileDisplay();
+    return currentAuthUser;
+  } catch (e) {
+    // Network failure — keep cached user; app still works
+    return currentAuthUser;
+  }
+}
+
+/* Update the sidebar profile chip to show the signed-in user's name+initial,
+ * or fall back to state.user.name (anonymous) when not signed in. */
+function refreshProfileDisplay() {
+  const nameEl = document.getElementById('user-name');
+  const avatarEl = document.getElementById('user-avatar');
+  if (!nameEl || !avatarEl) return;
+  const display = (currentAuthUser && currentAuthUser.name) ? currentAuthUser.name
+                : (state && state.user && state.user.name) ? state.user.name
+                : 'Average Joe';
+  nameEl.textContent = display;
+  avatarEl.textContent = (display || '?').charAt(0).toUpperCase();
+}
+
+/* Send a magic-link email. Returns { ok } or { error }. */
+async function requestMagicLink(email) {
+  try {
+    const res = await fetch(`${WORKER_URL}/api/auth/email-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { error: data.error || `Server error (${res.status})` };
+    return { ok: true };
+  } catch (e) {
+    return { error: 'Network error — try again.' };
+  }
+}
+
+/* Kick off Google OAuth — full-page redirect. */
+function startGoogleSignIn() {
+  window.location.href = `${WORKER_URL}/api/auth/google`;
+}
+
+/* Sign out — invalidate the session on the server, clear local copies. */
+async function signOut() {
+  const token = getSessionToken();
+  if (token) {
+    try {
+      await fetch(`${WORKER_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+    } catch (e) { /* ignore — sign out locally anyway */ }
+  }
+  setSessionToken(null);
+  setCachedAuthUser(null);
+  currentAuthUser = null;
+  refreshProfileDisplay();
+  toast('Signed out.');
+  navigate(currentView);
+}
+
+
 /* Mobile tab — persists which tab the user last had active so reloads land
  * on the same tab. Desktop ignores this. */
 const STORAGE_MOBILE_TAB_KEY = 'realcal_mobile_tab';
@@ -5630,6 +5762,83 @@ function openFeedbackModal() {
   });
 }
 
+/* Sign-in modal — two paths: Google OAuth (full-page redirect) or email
+ * magic link (POST to worker, then "check your email" confirmation). */
+function openSignInModal() {
+  const modal = document.getElementById('modal');
+  modal.className = 'modal';
+  modal.innerHTML = `<div class="modal-h">Sign in</div>
+    <div class="modal-sub">Back up your data and sync across devices. Your data stays here either way.</div>
+
+    <button class="signin-btn signin-google" id="signin-google-btn">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+        <path fill="#4285F4" d="M22.5 12.27c0-.79-.07-1.55-.2-2.27H12v4.51h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.3z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.99 7.28-2.66l-3.57-2.75c-.99.66-2.25 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.12c-.22-.66-.35-1.36-.35-2.12s.13-1.46.35-2.12V7.04H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.96l3.66-2.84z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.04l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/>
+      </svg>
+      Continue with Google
+    </button>
+
+    <div class="signin-divider"><span>or</span></div>
+
+    <div class="signin-email-row">
+      <input type="email" class="signin-email-input" id="signin-email-input" placeholder="you@example.com" autocomplete="email" />
+      <button class="btn btn-primary signin-email-btn" id="signin-email-btn">Send link</button>
+    </div>
+    <div class="signin-hint" id="signin-hint">We'll email you a one-tap sign-in link. No password needed.</div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-block" id="modal-cancel">Cancel</button>
+    </div>`;
+  document.getElementById('modal-backdrop').classList.add('open');
+  setTimeout(() => {
+    const inp = document.getElementById('signin-email-input');
+    if (inp) inp.focus();
+  }, 80);
+
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('signin-google-btn').addEventListener('click', () => {
+    startGoogleSignIn();
+  });
+
+  const emailInput = document.getElementById('signin-email-input');
+  const emailBtn = document.getElementById('signin-email-btn');
+  const hint = document.getElementById('signin-hint');
+  const submitEmail = async () => {
+    const email = (emailInput.value || '').trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      hint.textContent = 'Enter a valid email address.';
+      hint.className = 'signin-hint signin-hint-err';
+      return;
+    }
+    emailBtn.disabled = true;
+    emailBtn.textContent = 'Sending…';
+    hint.textContent = '';
+    const result = await requestMagicLink(email);
+    emailBtn.disabled = false;
+    emailBtn.textContent = 'Send link';
+    if (result.error) {
+      hint.textContent = result.error;
+      hint.className = 'signin-hint signin-hint-err';
+      return;
+    }
+    // Success — show confirmation state in the same modal
+    modal.innerHTML = `<div class="modal-h">Check your email</div>
+      <div class="modal-sub">We sent a sign-in link to <strong>${escapeAttr(email)}</strong>. The link is good for 15 minutes.</div>
+      <div class="signin-confirmation">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8l9 6 9-6"/><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
+        <div>Click the link in that email to sign in. You can close this window.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-block" id="modal-cancel-2">Close</button>
+      </div>`;
+    document.getElementById('modal-cancel-2').addEventListener('click', closeModal);
+  };
+  emailBtn.addEventListener('click', submitEmail);
+  emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitEmail(); });
+}
+
 function openWeighIn() {
   const today = todayISO();
   const existing = state.weights.find(w => w.date === today);
@@ -5791,6 +6000,28 @@ function openSettings() {
     </div>
 
     <div class="settings-section">
+      <div class="settings-section-eyebrow">Account</div>
+      ${currentAuthUser ? `
+        <div class="settings-account-row">
+          <div class="settings-account-info">
+            <div class="settings-account-name">${escapeAttr(currentAuthUser.name || currentAuthUser.email)}</div>
+            <div class="settings-account-email">${escapeAttr(currentAuthUser.email)}</div>
+            <div class="settings-account-plan">${currentAuthUser.plan === 'pro' ? 'Pro' : 'Free plan'}</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="settings-signout-btn">Sign out</button>
+        </div>
+      ` : `
+        <div class="settings-item">
+          <div>
+            <div class="settings-item-label">Sign in to back up your data</div>
+            <div class="settings-item-detail">Sync across devices. Your data stays here either way.</div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="settings-signin-btn">Sign in</button>
+        </div>
+      `}
+    </div>
+
+    <div class="settings-section">
       <div class="settings-section-eyebrow">About</div>
       <div class="settings-about-links">
         <a href="/privacy.html" target="_blank" rel="noopener">Privacy policy</a>
@@ -5835,6 +6066,17 @@ function openSettings() {
   if (memoryBtn) memoryBtn.addEventListener('click', () => {
     closeModal();
     setTimeout(openMemoryModal, 120);
+  });
+  const signinBtn = document.getElementById('settings-signin-btn');
+  if (signinBtn) signinBtn.addEventListener('click', () => {
+    closeModal();
+    setTimeout(openSignInModal, 120);
+  });
+  const signoutBtn = document.getElementById('settings-signout-btn');
+  if (signoutBtn) signoutBtn.addEventListener('click', async () => {
+    if (!confirm('Sign out? Your local data stays on this device.')) return;
+    closeModal();
+    await signOut();
   });
 }
 
@@ -6419,6 +6661,15 @@ function completeOnboarding() {
 function init() {
   state = loadState();
   chatHistory = loadChatHistory(); // restore today's chat across reloads
+
+  // Hydrate auth from localStorage (instant), then validate against the
+  // server in the background. If the cached user differs from the server
+  // (e.g. they changed name on another device, or the session was revoked),
+  // refreshProfileDisplay handles the swap once /api/auth/me returns.
+  currentAuthUser = getCachedAuthUser();
+  if (getSessionToken()) {
+    fetchCurrentAuthUser(); // fire and forget
+  }
 
   // Register service worker so the app is installable as a PWA. Only in
   // production (https). Service worker handles offline asset caching;

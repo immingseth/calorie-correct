@@ -132,6 +132,38 @@ Say "I don't have that number" rather than reconstructing.
   "I under-log by X%" setting). Use this number — it matches the Today card.
 - todayIntakeCalLogged → raw logged food intake before calibration. Reference
   this only if the user asks something like "what did I actually log?"
+
+FOOD ACCURACY MATH — pin this down to avoid getting it backwards:
+- foodAccuracyPct represents how much of the user's REAL intake their logs
+  capture. If foodAccuracyPct = 85, they log 85% of what they actually eat
+  (BLT problem — bites, licks, tastes, oil they didn't measure, etc.).
+- The calibrated intake INFLATES the raw log to estimate reality:
+    todayIntakeCal = todayIntakeCalLogged / (foodAccuracyPct / 100)
+- Direction (commit this to memory):
+    HIGHER accuracy % → LESS inflation → LOWER calibrated intake → BIGGER deficit
+    LOWER  accuracy % → MORE inflation → HIGHER calibrated intake → SMALLER deficit
+- At 100% accuracy, no inflation is applied: todayIntakeCal == todayIntakeCalLogged.
+- At 50% accuracy, calibrated intake is TWICE the logged value.
+
+WHEN A USER ASKS "WHAT IF I WERE LOGGING AT 100% ACCURACY":
+- 100%-accuracy intake = todayIntakeCalLogged (the raw logged number, no inflation)
+- 100%-accuracy deficit = todayTDEE − todayIntakeCalLogged
+- This will be a BIGGER deficit than what they currently see (because they
+  log < 100% today, so their calibrated intake is higher, which makes the
+  current deficit smaller).
+- Worked example, foodAccuracyPct = 85, todayIntakeCalLogged = 2345, todayTDEE = 3465:
+    current calibrated intake = 2345 / 0.85 = 2759
+    current deficit = 3465 - 2759 = 706
+    100%-accuracy intake = 2345 (no inflation)
+    100%-accuracy deficit = 3465 - 2345 = 1120
+    "At 100% accuracy your deficit would be 1,120 cal — bigger than today's
+    706 cal because we wouldn't inflate your intake to account for under-logging."
+
+WHEN A USER ASKS "WHAT IF MY ACCURACY WERE X% INSTEAD OF Y%":
+- New calibrated intake = todayIntakeCalLogged / (X / 100)
+- New deficit = todayTDEE − new calibrated intake
+- Always write out the math step by step using the field names, never
+  improvise the formula direction.
 - todayTDEE → calories out total = baselineTDEE + exercise burn (after
   tracker accuracy discount). The "out" half. The Today card's second
   number can show this when toggled.
@@ -619,6 +651,180 @@ function parseClaudeJson(rawText) {
   }
 }
 
+/* ============================================================
+   AUTH — magic-link email + Google OAuth, sessions stored in D1
+   ============================================================
+   The frontend lives on caloriecorrect.com (different origin from this
+   worker), so we use bearer tokens in localStorage rather than HttpOnly
+   cookies. The flow:
+   1. User signs in via magic link or Google.
+   2. Worker creates a session row in D1, returns a random session_token.
+   3. Frontend saves the token in localStorage and includes it as
+      Authorization: Bearer <token> on every authenticated request.
+   4. Worker validates by looking up the token in D1 sessions.
+   5. Sliding expiry: each authenticated request bumps last_active_at.
+*/
+const APP_ORIGIN = 'https://caloriecorrect.com';
+const AUTH_PAGE = `${APP_ORIGIN}/auth.html`;
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;  // 30 days
+const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;         // 15 minutes
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;        // 10 minutes
+
+function nowMs() { return Date.now(); }
+
+/* Cryptographically-secure random hex string. 32 bytes = 256-bit token. */
+function randomToken(bytes = 32) {
+  const arr = new Uint8Array(bytes);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* Pull bearer token from "Authorization: Bearer <token>" header. */
+function bearerToken(req) {
+  const h = req.headers.get('Authorization') || '';
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : null;
+}
+
+function normalizeEmail(email) { return String(email || '').trim().toLowerCase(); }
+function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+
+/* HMAC-SHA256 for signing OAuth state (CSRF protection). Returns hex. */
+async function hmacSign(secret, data) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(data));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/* OAuth state — base64url(JSON{returnTo,issuedAt}) + truncated HMAC. */
+async function makeOAuthState(secret, returnTo) {
+  const payload = JSON.stringify({ r: returnTo, t: nowMs() });
+  const b64 = btoa(payload).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const sig = await hmacSign(secret, b64);
+  return `${b64}.${sig.slice(0, 32)}`;
+}
+
+async function verifyOAuthState(secret, state) {
+  const [b64, sig] = String(state || '').split('.');
+  if (!b64 || !sig) return null;
+  const expected = await hmacSign(secret, b64);
+  if (expected.slice(0, 32) !== sig) return null;
+  try {
+    const payload = JSON.parse(atob(b64.replace(/-/g, '+').replace(/_/g, '/')));
+    if (typeof payload.t !== 'number') return null;
+    if (nowMs() - payload.t > OAUTH_STATE_TTL_MS) return null;
+    return payload;
+  } catch (e) { return null; }
+}
+
+/* D1 — find an existing user by google_id or email; create one if neither
+ * matches. Updates last_seen_at on every call. Returns the user row. */
+async function findOrCreateUser(env, { email, name, googleId }) {
+  const e = normalizeEmail(email);
+  const now = nowMs();
+  if (googleId) {
+    const r = await env.DB.prepare('SELECT * FROM users WHERE google_id = ?').bind(googleId).first();
+    if (r) {
+      await env.DB.prepare('UPDATE users SET last_seen_at = ?, email = ? WHERE id = ?')
+        .bind(now, e, r.id).run();
+      r.email = e;
+      r.last_seen_at = now;
+      return r;
+    }
+  }
+  const byEmail = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(e).first();
+  if (byEmail) {
+    if (googleId && !byEmail.google_id) {
+      await env.DB.prepare('UPDATE users SET google_id = ?, last_seen_at = ? WHERE id = ?')
+        .bind(googleId, now, byEmail.id).run();
+      byEmail.google_id = googleId;
+    } else {
+      await env.DB.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').bind(now, byEmail.id).run();
+    }
+    byEmail.last_seen_at = now;
+    return byEmail;
+  }
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO users (id, email, name, google_id, plan, created_at, last_seen_at)
+    VALUES (?, ?, ?, ?, 'free', ?, ?)
+  `).bind(id, e, name || null, googleId || null, now, now).run();
+  return { id, email: e, name: name || null, google_id: googleId || null, plan: 'free', created_at: now, last_seen_at: now };
+}
+
+/* D1 — issue a new session token for a user. */
+async function createSession(env, userId, userAgent) {
+  const token = randomToken(48);
+  const now = nowMs();
+  const expires = now + SESSION_TTL_MS;
+  await env.DB.prepare(`
+    INSERT INTO sessions (token, user_id, created_at, expires_at, last_active_at, user_agent)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(token, userId, now, expires, now, userAgent || null).run();
+  return token;
+}
+
+/* D1 — given a bearer token, return the associated user (or null).
+ * Refreshes last_active_at on hit to support sliding expiry. */
+async function getSessionUser(env, token) {
+  if (!token) return null;
+  const now = nowMs();
+  const row = await env.DB.prepare(`
+    SELECT u.* FROM sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.token = ? AND s.expires_at > ?
+  `).bind(token, now).first();
+  if (!row) return null;
+  await env.DB.prepare('UPDATE sessions SET last_active_at = ? WHERE token = ?')
+    .bind(now, token).run();
+  return row;
+}
+
+/* Resend — send a magic-link sign-in email. */
+async function sendMagicLinkEmail(env, email, magicToken) {
+  const link = `${AUTH_PAGE}?magic=${magicToken}`;
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 480px; margin: 32px auto; padding: 0 16px; color: #2C2826;">
+<h2 style="font-family: Georgia, serif; color: #446957; margin-bottom: 8px;">Sign in to Calorie Correct</h2>
+<p>Click the button below to sign in. The link is valid for 15 minutes.</p>
+<p style="margin: 24px 0;"><a href="${link}" style="display: inline-block; background: #446957; color: white; text-decoration: none; padding: 12px 20px; border-radius: 8px; font-weight: 600;">Sign in to Calorie Correct</a></p>
+<p style="font-size: 12px; color: #8A8278;">Or paste this link into your browser:<br><a href="${link}" style="color: #446957; word-break: break-all;">${link}</a></p>
+<hr style="border: none; border-top: 1px solid #ECE5D8; margin: 32px 0;" />
+<p style="font-size: 11px; color: #8A8278;">If you didn't request this, you can ignore this email.<br>— Cal at Calorie Correct</p>
+</body></html>`;
+  const text = `Sign in to Calorie Correct\n\nClick the link below to sign in. Valid for 15 minutes.\n\n${link}\n\nIf you didn't request this, you can ignore this email.\n\n— Cal at Calorie Correct`;
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'Cal at Calorie Correct <hi@caloriecorrect.com>',
+      to: [email],
+      subject: 'Sign in to Calorie Correct',
+      html, text,
+    }),
+  });
+  if (!res.ok) {
+    return { error: `Resend ${res.status}: ${await res.text()}` };
+  }
+  return { ok: true };
+}
+
+/* Strip private fields before returning a user to the client. */
+function publicUser(u) {
+  if (!u) return null;
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    plan: u.plan,
+    createdAt: u.created_at,
+  };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -631,6 +837,148 @@ export default {
 
     if (url.pathname === '/api/health' && request.method === 'GET') {
       return jsonResponse({ ok: true, model: MODEL }, 200, cors);
+    }
+
+    // ============ AUTH ENDPOINTS ============
+
+    // POST /api/auth/email-link — generate a magic link and email it via Resend.
+    // Body: { email }. Always returns ok=true even if email doesn't exist
+    // (don't leak which addresses are registered).
+    if (url.pathname === '/api/auth/email-link' && request.method === 'POST') {
+      let body;
+      try { body = await request.json(); }
+      catch (e) { return jsonResponse({ error: 'Invalid JSON' }, 400, cors); }
+
+      const email = normalizeEmail(body.email);
+      if (!isValidEmail(email)) {
+        return jsonResponse({ error: 'Enter a valid email address.' }, 400, cors);
+      }
+
+      const token = randomToken(32);
+      const now = nowMs();
+      const expires = now + MAGIC_LINK_TTL_MS;
+
+      try {
+        await env.DB.prepare(`
+          INSERT INTO magic_links (token, email, created_at, expires_at)
+          VALUES (?, ?, ?, ?)
+        `).bind(token, email, now, expires).run();
+      } catch (e) {
+        return jsonResponse({ error: 'Database error', detail: String(e) }, 500, cors);
+      }
+
+      const send = await sendMagicLinkEmail(env, email, token);
+      if (send.error) {
+        return jsonResponse({ error: 'Could not send email', detail: send.error }, 502, cors);
+      }
+      return jsonResponse({ ok: true }, 200, cors);
+    }
+
+    // POST /api/auth/verify — exchange a magic-link token for a session.
+    // Body: { token }. Returns { session_token, user } on success.
+    // Single-use: the magic link is invalidated after first redemption.
+    if (url.pathname === '/api/auth/verify' && request.method === 'POST') {
+      let body;
+      try { body = await request.json(); }
+      catch (e) { return jsonResponse({ error: 'Invalid JSON' }, 400, cors); }
+
+      const token = String(body.token || '').trim();
+      if (!token) return jsonResponse({ error: 'Token required' }, 400, cors);
+
+      const now = nowMs();
+      const link = await env.DB.prepare('SELECT * FROM magic_links WHERE token = ?').bind(token).first();
+      if (!link) return jsonResponse({ error: 'Invalid sign-in link.' }, 401, cors);
+      if (link.used_at) return jsonResponse({ error: 'This link has already been used.' }, 401, cors);
+      if (link.expires_at < now) return jsonResponse({ error: 'This link has expired. Request a new one.' }, 401, cors);
+
+      await env.DB.prepare('UPDATE magic_links SET used_at = ? WHERE token = ?').bind(now, token).run();
+
+      const user = await findOrCreateUser(env, { email: link.email });
+      const sessionToken = await createSession(env, user.id, request.headers.get('User-Agent'));
+      return jsonResponse({ session_token: sessionToken, user: publicUser(user) }, 200, cors);
+    }
+
+    // GET /api/auth/google — start Google OAuth. Redirects to Google.
+    if (url.pathname === '/api/auth/google' && request.method === 'GET') {
+      const state = await makeOAuthState(env.SESSION_SECRET, AUTH_PAGE);
+      const params = new URLSearchParams({
+        client_id: env.GOOGLE_CLIENT_ID,
+        redirect_uri: `${url.origin}/api/auth/google/callback`,
+        response_type: 'code',
+        scope: 'openid email profile',
+        state,
+        access_type: 'online',
+        prompt: 'select_account',
+      });
+      return Response.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, 302);
+    }
+
+    // GET /api/auth/google/callback — Google sends user back here with a code.
+    // Exchange for tokens, decode the id_token to get email/name/sub,
+    // find-or-create user, mint a session, redirect to auth.html with the
+    // session token in the URL fragment so the SPA can stash it.
+    if (url.pathname === '/api/auth/google/callback' && request.method === 'GET') {
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const verifiedState = await verifyOAuthState(env.SESSION_SECRET, state);
+      if (!verifiedState) return new Response('Invalid OAuth state.', { status: 400 });
+      if (!code) return new Response('Missing authorization code.', { status: 400 });
+
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: env.GOOGLE_CLIENT_ID,
+          client_secret: env.GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${url.origin}/api/auth/google/callback`,
+          grant_type: 'authorization_code',
+        }),
+      });
+      if (!tokenRes.ok) {
+        const detail = await tokenRes.text();
+        return new Response(`Google token exchange failed: ${detail}`, { status: 502 });
+      }
+      const tokens = await tokenRes.json();
+      const idToken = tokens.id_token;
+      if (!idToken) return new Response('Missing id_token from Google.', { status: 502 });
+
+      let payload;
+      try {
+        const payloadB64 = idToken.split('.')[1];
+        payload = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')));
+      } catch (e) {
+        return new Response('Could not decode id_token.', { status: 502 });
+      }
+
+      if (!payload.email) return new Response('Google did not return an email.', { status: 502 });
+
+      const user = await findOrCreateUser(env, {
+        email: payload.email,
+        name: payload.name || payload.given_name,
+        googleId: payload.sub,
+      });
+      const sessionToken = await createSession(env, user.id, request.headers.get('User-Agent'));
+
+      // Redirect to auth.html with session token in the URL fragment.
+      // Fragments aren't sent to servers and don't appear in standard logs.
+      return Response.redirect(`${AUTH_PAGE}#session=${sessionToken}`, 302);
+    }
+
+    // GET /api/auth/me — return the current user (requires Bearer token).
+    if (url.pathname === '/api/auth/me' && request.method === 'GET') {
+      const user = await getSessionUser(env, bearerToken(request));
+      if (!user) return jsonResponse({ error: 'Not authenticated' }, 401, cors);
+      return jsonResponse({ user: publicUser(user) }, 200, cors);
+    }
+
+    // POST /api/auth/logout — invalidate the current session.
+    if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+      const token = bearerToken(request);
+      if (token) {
+        await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+      }
+      return jsonResponse({ ok: true }, 200, cors);
     }
 
     // Daily greeting — fires once per day on first app open. Brand-aligned
