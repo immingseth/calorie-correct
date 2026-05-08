@@ -8,6 +8,10 @@ deployment:
     - export DEPLOYPATH=/home4/sethimmi/caloriecorrect.com/
     # Copy the landing page
     - /bin/cp -R index.html $DEPLOYPATH
+    # Static legal/auth pages at the site root
+    - /bin/cp -R privacy.html $DEPLOYPATH
+    - /bin/cp -R terms.html $DEPLOYPATH
+    - /bin/cp -R auth.html $DEPLOYPATH
     # Copy the logo and favicon at the project root (used by the landing page)
     - /bin/cp -R cc-logo.png $DEPLOYPATH
     - /bin/cp -R favicon.png $DEPLOYPATH
