@@ -429,10 +429,10 @@
     <h1 class="hero-title">Just tell us<br>what you <em>ate.</em></h1>
     <p class="hero-sub">Calorie Correct is a chat-first AI coach that turns plain-language meals into structured logs, watches your real weight trend, and recalibrates the math weekly so the numbers always match reality.</p>
     <div class="hero-ctas">
-      <a class="btn btn-primary" href="app/index.html?onboard=1">Get started — it's free</a>
-      <a class="btn btn-secondary" href="app/index.html">See it with sample data →</a>
+      <button class="btn btn-primary" data-open-signin>Get started — it's free</button>
+      <button class="btn btn-secondary" data-open-signin>Already have an account? Sign in</button>
     </div>
-    <div class="hero-disclaimer">No account required. Your data lives on your device.</div>
+    <div class="hero-disclaimer">Free to start. No password — sign in with Google or email.</div>
   </div>
 </section>
 
@@ -527,10 +527,9 @@
 <section class="final-cta">
   <div class="container">
     <h2 class="final-h">Try it now.</h2>
-    <p class="final-sub">Setup takes 90 seconds. No account needed. Your data stays on your device until we build the backend.</p>
+    <p class="final-sub">Setup takes 90 seconds. Sign in with Google or get a one-tap link by email — no password.</p>
     <div class="hero-ctas">
-      <a class="btn btn-primary" href="app/index.html?onboard=1">Set up with my numbers</a>
-      <a class="btn btn-secondary" href="app/index.html">Just show me the demo →</a>
+      <button class="btn btn-primary" data-open-signin>Get started — it's free</button>
     </div>
   </div>
 </section>
@@ -545,6 +544,296 @@
     <a href="terms.html">Terms</a>
   </div>
 </footer>
+
+<!-- ============ SIGN-IN MODAL ============ -->
+<!-- Triggered by [data-open-signin] buttons. Two flows: Google OAuth (full
+     redirect to the Worker) or email magic link (POST to Worker, then show
+     a "check your email" confirmation). Same find-or-create flow handles
+     both new sign-ups and returning users. -->
+<div id="signin-modal-backdrop" class="signin-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="signin-modal-title">
+  <div class="signin-modal" id="signin-modal">
+    <div id="signin-modal-content"></div>
+  </div>
+</div>
+
+<style>
+  .signin-modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(28, 42, 35, 0.55);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    backdrop-filter: blur(2px);
+  }
+  .signin-modal-backdrop.open { display: flex; }
+  .signin-modal {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 32px 28px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 12px 40px rgba(15, 30, 22, 0.18);
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .signin-modal-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
+  }
+  .signin-modal-sub {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-bottom: 18px;
+  }
+  .signin-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 16px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    margin-bottom: 8px;
+  }
+  .signin-btn:hover {
+    background: #EAF0EC;
+    border-color: var(--primary);
+  }
+  .signin-divider {
+    position: relative;
+    text-align: center;
+    margin: 14px 0;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .signin-divider::before, .signin-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: calc(50% - 20px);
+    height: 1px;
+    background: var(--border);
+  }
+  .signin-divider::before { left: 0; }
+  .signin-divider::after  { right: 0; }
+  .signin-divider span { background: var(--card); padding: 0 4px; position: relative; }
+  .signin-email-row { display: flex; gap: 8px; margin-bottom: 6px; }
+  .signin-email-input {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .signin-email-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(118, 155, 108, 0.15);
+  }
+  .signin-email-btn {
+    padding: 10px 16px;
+    background: var(--primary-dark);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    white-space: nowrap;
+  }
+  .signin-email-btn:hover { background: var(--primary); }
+  .signin-email-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .signin-hint { font-size: 12px; color: var(--muted); line-height: 1.4; margin-bottom: 4px; }
+  .signin-hint-err { color: #b54b3a; }
+  .signin-confirmation {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 24px 20px;
+    background: #EAF0EC;
+    border-radius: 12px;
+    text-align: center;
+    color: var(--primary-dark);
+    margin: 12px 0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .signin-cancel {
+    width: 100%;
+    margin-top: 12px;
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .signin-cancel:hover { background: #f5f1ea; border-color: var(--primary-light); }
+  .signin-fineprint { font-size: 11px; color: var(--muted); text-align: center; margin-top: 14px; line-height: 1.4; }
+  .signin-fineprint a { color: var(--muted); text-decoration: underline; }
+</style>
+
+<script>
+  // Sign-in modal — used by every [data-open-signin] button on the landing page.
+  // Same flow handles both first-time sign-up and returning sign-in (the worker
+  // does find-or-create-user, so the user experience is identical).
+  (function () {
+    const WORKER_URL = 'https://calorie-correct-coach.calorie-correct.workers.dev';
+    const backdrop = document.getElementById('signin-modal-backdrop');
+    const content = document.getElementById('signin-modal-content');
+
+    function chooserHTML() {
+      return `
+        <div class="signin-modal-title" id="signin-modal-title">Sign in to Calorie Correct</div>
+        <div class="signin-modal-sub">No password needed. Use Google or get a one-tap link by email.</div>
+
+        <button class="signin-btn" id="signin-google-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="#4285F4" d="M22.5 12.27c0-.79-.07-1.55-.2-2.27H12v4.51h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.75h3.57c2.08-1.92 3.28-4.74 3.28-8.3z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.99 7.28-2.66l-3.57-2.75c-.99.66-2.25 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.12c-.22-.66-.35-1.36-.35-2.12s.13-1.46.35-2.12V7.04H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.96l3.66-2.84z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.04l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <div class="signin-divider"><span>or</span></div>
+
+        <div class="signin-email-row">
+          <input type="email" class="signin-email-input" id="signin-email-input" placeholder="you@example.com" autocomplete="email" />
+          <button class="signin-email-btn" id="signin-email-btn">Send link</button>
+        </div>
+        <div class="signin-hint" id="signin-hint">We'll email you a one-tap sign-in link. Valid for 15 minutes.</div>
+
+        <button class="signin-cancel" id="signin-cancel-btn">Cancel</button>
+
+        <div class="signin-fineprint">
+          By signing in, you agree to our
+          <a href="terms.html" target="_blank">Terms</a> and
+          <a href="privacy.html" target="_blank">Privacy Policy</a>.
+        </div>
+      `;
+    }
+
+    function confirmHTML(email) {
+      const safe = String(email).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
+      return `
+        <div class="signin-modal-title">Check your email</div>
+        <div class="signin-modal-sub">We sent a sign-in link to <strong>${safe}</strong>. The link is good for 15 minutes.</div>
+        <div class="signin-confirmation">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8l9 6 9-6"/><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
+          <div>Click the link in that email to sign in. You can close this window.</div>
+        </div>
+        <button class="signin-cancel" id="signin-cancel-btn">Close</button>
+      `;
+    }
+
+    function open() {
+      content.innerHTML = chooserHTML();
+      backdrop.classList.add('open');
+      setTimeout(() => {
+        const inp = document.getElementById('signin-email-input');
+        if (inp) inp.focus();
+      }, 80);
+      wireChooser();
+    }
+    function close() { backdrop.classList.remove('open'); }
+
+    function wireChooser() {
+      document.getElementById('signin-cancel-btn').addEventListener('click', close);
+      document.getElementById('signin-google-btn').addEventListener('click', () => {
+        window.location.href = WORKER_URL + '/api/auth/google';
+      });
+      const inp = document.getElementById('signin-email-input');
+      const btn = document.getElementById('signin-email-btn');
+      const hint = document.getElementById('signin-hint');
+      const submit = async () => {
+        const email = (inp.value || '').trim();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          hint.textContent = 'Enter a valid email address.';
+          hint.className = 'signin-hint signin-hint-err';
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+        hint.textContent = '';
+        try {
+          const res = await fetch(WORKER_URL + '/api/auth/email-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            hint.textContent = data.error || 'Could not send email. Try again.';
+            hint.className = 'signin-hint signin-hint-err';
+            btn.disabled = false;
+            btn.textContent = 'Send link';
+            return;
+          }
+          // Show confirmation state
+          content.innerHTML = confirmHTML(email);
+          document.getElementById('signin-cancel-btn').addEventListener('click', close);
+        } catch (e) {
+          hint.textContent = 'Network error. Check your connection and try again.';
+          hint.className = 'signin-hint signin-hint-err';
+          btn.disabled = false;
+          btn.textContent = 'Send link';
+        }
+      };
+      btn.addEventListener('click', submit);
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    }
+
+    // Wire all triggers
+    document.querySelectorAll('[data-open-signin]').forEach(el => {
+      el.addEventListener('click', (e) => { e.preventDefault(); open(); });
+    });
+    // Click outside modal to close
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    // Esc to close
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && backdrop.classList.contains('open')) close();
+    });
+
+    // If returning user already has a session token (cc_session in localStorage),
+    // bounce them straight to the app — no need to see the marketing page.
+    try {
+      if (localStorage.getItem('cc_session')) {
+        window.location.replace('/app/');
+      }
+    } catch (e) { /* localStorage blocked — show landing as normal */ }
+  })();
+</script>
 
 </body>
 </html>

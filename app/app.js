@@ -604,9 +604,11 @@ async function signOut() {
   setSessionToken(null);
   setCachedAuthUser(null);
   currentAuthUser = null;
-  refreshProfileDisplay();
-  toast('Signed out.');
-  navigate(currentView);
+  // Bounce back to the landing page. The user's localStorage data stays
+  // intact on this device, but the gate will keep them out of /app/ until
+  // they sign in again (or kick them straight in via the cc_session check
+  // on the landing page if they have a fresh session somehow).
+  window.location.href = '/';
 }
 
 
@@ -6659,6 +6661,18 @@ function completeOnboarding() {
    INIT
    =================================================== */
 function init() {
+  // Auth gate — the app requires either an active session or pre-existing
+  // local state. New visitors with neither get sent to the landing page to
+  // sign up. Existing local-only users (testers, anyone who started before
+  // auth was required) stay in the app and can sign in later via Settings;
+  // their localStorage data flows up to the server when they do (PA-5 sync).
+  const hasSessionAtBoot = !!getSessionToken();
+  const hasLocalStateAtBoot = !!localStorage.getItem(STORAGE_KEY);
+  if (!hasSessionAtBoot && !hasLocalStateAtBoot) {
+    window.location.replace('/');
+    return;
+  }
+
   state = loadState();
   chatHistory = loadChatHistory(); // restore today's chat across reloads
 
